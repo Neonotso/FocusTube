@@ -592,6 +592,7 @@
       <option value="">None selected</option>
     </select>
     <button class="btn-secondary" onclick="loadPlaylistOptions()">Refresh Playlist List</button>
+    <div id="settings-playlist-debug" style="margin:10px 0 4px;color:var(--text-muted);font-size:12px;line-height:1.5"></div>
     <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
     <button class="btn-secondary" onclick="signInYouTube()">Refresh Google Login</button>
     <button class="btn-secondary" onclick="signOutYouTube()">Sign Out</button>
@@ -620,6 +621,7 @@ let ACCESS_TOKEN = '';
 let TOKEN_EXPIRY = 0;
 let USER_NAME = '';
 let LATER_PLAYLIST_ID = '';
+let LATER_PLAYLIST_NAME = '';
 let currentTab = 'search';
 let nextPageTokens = {};
 let filteredShorts = 0;
@@ -633,6 +635,7 @@ const savedLaterVideoIds = new Set();
   TOKEN_EXPIRY = Number(localStorage.getItem('ct_token_expiry') || 0);
   USER_NAME = localStorage.getItem('ct_user_name') || '';
   LATER_PLAYLIST_ID = localStorage.getItem('ct_later_playlist_id') || '';
+  LATER_PLAYLIST_NAME = localStorage.getItem('ct_later_playlist_name') || '';
 
   document.getElementById('api-key-input').value = API_KEY;
 
@@ -950,8 +953,8 @@ async function loadWatchLater(append = false) {
     if ((!data.items || data.items.length === 0) && LATER_PLAYLIST_ID) {
       data = await fetchPlaylistItems(LATER_PLAYLIST_ID);
       playlistId = LATER_PLAYLIST_ID;
-      sourceLabel = `Later playlist (${playlistId})`;
-      showToast('Using your fallback Later playlist');
+      sourceLabel = `Later playlist: ${LATER_PLAYLIST_NAME || playlistId} (${playlistId})`;
+      showToast(`Using your fallback Later playlist: ${LATER_PLAYLIST_NAME || playlistId}`);
     }
 
     nextPageTokens.watchlater = data.nextPageToken || null;
@@ -1195,20 +1198,24 @@ function closePlayer() {
 async function openSettings() {
   document.getElementById('settings-api-key').value = API_KEY;
   await loadPlaylistOptions();
+  updatePlaylistDebug();
   document.getElementById('settings-modal').classList.add('open');
 }
 function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
 function closeSettingsIfOutside(e) { if (e.target === document.getElementById('settings-modal')) closeSettings(); }
 function saveSettings() {
   API_KEY = document.getElementById('settings-api-key').value.trim();
-  LATER_PLAYLIST_ID = document.getElementById('settings-playlist-select').value.trim();
+  const select = document.getElementById('settings-playlist-select');
+  LATER_PLAYLIST_ID = select.value.trim();
+  LATER_PLAYLIST_NAME = select.selectedOptions?.[0]?.textContent || '';
   localStorage.setItem('ct_client_id', CLIENT_ID);
   localStorage.setItem('ct_api_key', API_KEY);
   localStorage.setItem('ct_later_playlist_id', LATER_PLAYLIST_ID);
+  localStorage.setItem('ct_later_playlist_name', LATER_PLAYLIST_NAME);
   tokenClient = null;
   closeSettings();
   updateAuthStatus();
-  showToast('Settings saved');
+  showToast(`Settings saved${LATER_PLAYLIST_NAME ? ` — Later: ${LATER_PLAYLIST_NAME}` : ''}`);
 }
 function resetApp() {
   if (!confirm('Reset CleanTube completely?')) return;
@@ -1284,7 +1291,7 @@ async function saveToLater(videoId, btn) {
       btn.classList.add('saved');
       btn.disabled = true;
     }
-    showToast('Saved to Later');
+    showToast(`Saved to Later: ${LATER_PLAYLIST_NAME || LATER_PLAYLIST_ID}`);
     if (currentTab === 'watchlater') {
       nextPageTokens.watchlater = '';
       loadWatchLater(false);
@@ -1330,25 +1337,44 @@ async function loadPlaylistOptions() {
     opt.textContent = 'Sign in first to load playlists';
     select.appendChild(opt);
     select.value = '';
+    updatePlaylistDebug();
     return;
   }
 
   try {
-    const data = await apiFetch('https://www.googleapis.com/youtube/v3/playlists?part=snippet&mine=true&maxResults=50', { auth: true });
+    const data = await apiFetch('https://www.googleapis.com/youtube/v3/playlists?part=snippet,status&mine=true&maxResults=50', { auth: true });
     for (const item of (data.items || [])) {
       const opt = document.createElement('option');
       opt.value = item.id;
-      opt.textContent = item.snippet?.title || item.id;
+      const privacy = item.status?.privacyStatus ? ` (${item.status.privacyStatus})` : '';
+      opt.textContent = `${item.snippet?.title || item.id}${privacy}`;
+      opt.dataset.plainTitle = item.snippet?.title || item.id;
       select.appendChild(opt);
     }
     select.value = LATER_PLAYLIST_ID || '';
+    if (select.value && select.selectedOptions?.[0]) {
+      LATER_PLAYLIST_NAME = select.selectedOptions[0].dataset.plainTitle || select.selectedOptions[0].textContent || LATER_PLAYLIST_NAME;
+      localStorage.setItem('ct_later_playlist_name', LATER_PLAYLIST_NAME);
+    }
+    updatePlaylistDebug();
   } catch (e) {
     const opt = document.createElement('option');
     opt.value = '';
     opt.textContent = `Could not load playlists: ${e.message || 'Unknown error'}`;
     select.appendChild(opt);
     select.value = '';
+    updatePlaylistDebug();
   }
+}
+
+function updatePlaylistDebug() {
+  const el = document.getElementById('settings-playlist-debug');
+  if (!el) return;
+  if (!LATER_PLAYLIST_ID) {
+    el.textContent = 'No Later playlist selected yet.';
+    return;
+  }
+  el.innerHTML = `Selected Later playlist: <strong>${escHtml(LATER_PLAYLIST_NAME || '(unknown name)')}</strong><br>ID: <code>${escHtml(LATER_PLAYLIST_ID)}</code>`;
 }
 
 function getCachedFeed() {
