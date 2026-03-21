@@ -343,6 +343,15 @@
     cursor: pointer;
   }
   .mini-btn:hover { color: var(--text); border-color: var(--accent); }
+  .mini-btn.saved {
+    color: var(--green);
+    border-color: var(--green);
+    background: rgba(87,211,140,.08);
+  }
+  .mini-btn:disabled {
+    opacity: .9;
+    cursor: default;
+  }
   .video-title {
     font-size: 14px;
     font-weight: 500;
@@ -614,6 +623,7 @@ let currentTab = 'search';
 let nextPageTokens = {};
 let filteredShorts = 0;
 let tokenClient = null;
+const savedLaterVideoIds = new Set();
 
 (function init() {
   API_KEY = localStorage.getItem('ct_api_key') || '';
@@ -1070,7 +1080,7 @@ function renderVideosInto(videos, container, tabKey) {
           <div class="video-title">${escHtml(v.title)}</div>
           <div class="video-sub"><span>${escHtml(v.channel || '')}</span>${timeAgo ? `<span>${timeAgo}</span>` : ''}</div>
           <div class="video-actions">
-            <button class="mini-btn" onclick="event.stopPropagation(); saveToLater('${v.videoId}')">＋ Later</button>
+            <button class="mini-btn ${savedLaterVideoIds.has(v.videoId) ? 'saved' : ''}" ${savedLaterVideoIds.has(v.videoId) ? 'disabled' : ''} onclick="event.stopPropagation(); saveToLater('${v.videoId}', this)">${savedLaterVideoIds.has(v.videoId) ? '✓ Saved' : '＋ Later'}</button>
           </div>
         </div>
       </div>`;
@@ -1140,7 +1150,7 @@ function refreshFeed(force = false) {
   loadSubscriptionFeed(false);
 }
 
-async function saveToLater(videoId) {
+async function saveToLater(videoId, btn) {
   if (!hasValidToken()) {
     showToast('Sign in first');
     return;
@@ -1148,6 +1158,15 @@ async function saveToLater(videoId) {
   if (!LATER_PLAYLIST_ID) {
     showToast('Pick a Later playlist in Settings first');
     return;
+  }
+  if (savedLaterVideoIds.has(videoId)) {
+    showToast('Already saved to Later');
+    return;
+  }
+  const originalText = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
   }
   try {
     await fetch('https://www.googleapis.com/youtube/v3/playlistItems?part=snippet', {
@@ -1172,13 +1191,34 @@ async function saveToLater(videoId) {
       }
       return res.json();
     });
+    savedLaterVideoIds.add(videoId);
+    if (btn) {
+      btn.textContent = '✓ Saved';
+      btn.classList.add('saved');
+      btn.disabled = true;
+    }
     showToast('Saved to Later');
     if (currentTab === 'watchlater') {
       nextPageTokens.watchlater = '';
       loadWatchLater(false);
     }
   } catch (e) {
-    showToast(`Could not save: ${e.message || 'Unknown error'}`);
+    const msg = e.message || 'Unknown error';
+    if (/duplicate|already exists|videoAlreadyInPlaylist/i.test(msg)) {
+      savedLaterVideoIds.add(videoId);
+      if (btn) {
+        btn.textContent = '✓ Saved';
+        btn.classList.add('saved');
+        btn.disabled = true;
+      }
+      showToast('Already in Later');
+      return;
+    }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText || '＋ Later';
+    }
+    showToast(`Could not save: ${msg}`);
   }
 }
 
