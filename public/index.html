@@ -536,6 +536,7 @@
       <button class="nav-tab active" onclick="switchTab('feed')" id="tab-feed">Feed</button>
     </div>
     <div class="nav-right">
+      <div class="settings-btn" onclick="refreshApp()" title="Refresh app">↻</div>
       <div class="settings-btn" onclick="openSettings()">⚙</div>
     </div>
   </nav>
@@ -597,9 +598,9 @@ let tokenClient = null;
 (function init() {
   API_KEY = localStorage.getItem('ct_api_key') || '';
   CLIENT_ID = localStorage.getItem('ct_client_id') || DEFAULT_CLIENT_ID;
-  ACCESS_TOKEN = sessionStorage.getItem('ct_access_token') || '';
-  TOKEN_EXPIRY = Number(sessionStorage.getItem('ct_token_expiry') || 0);
-  USER_NAME = sessionStorage.getItem('ct_user_name') || '';
+  ACCESS_TOKEN = localStorage.getItem('ct_access_token') || '';
+  TOKEN_EXPIRY = Number(localStorage.getItem('ct_token_expiry') || 0);
+  USER_NAME = localStorage.getItem('ct_user_name') || '';
   LATER_PLAYLIST_ID = localStorage.getItem('ct_later_playlist_id') || '';
 
   document.getElementById('api-key-input').value = API_KEY;
@@ -652,8 +653,8 @@ function ensureTokenClient() {
         }
         ACCESS_TOKEN = resp.access_token;
         TOKEN_EXPIRY = Date.now() + ((resp.expires_in || 3600) * 1000) - 15000;
-        sessionStorage.setItem('ct_access_token', ACCESS_TOKEN);
-        sessionStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
+        localStorage.setItem('ct_access_token', ACCESS_TOKEN);
+        localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
         await loadUserProfile();
         updateAuthStatus();
         showApp();
@@ -680,9 +681,9 @@ function signOutYouTube() {
   ACCESS_TOKEN = '';
   TOKEN_EXPIRY = 0;
   USER_NAME = '';
-  sessionStorage.removeItem('ct_access_token');
-  sessionStorage.removeItem('ct_token_expiry');
-  sessionStorage.removeItem('ct_user_name');
+  localStorage.removeItem('ct_access_token');
+  localStorage.removeItem('ct_token_expiry');
+  localStorage.removeItem('ct_user_name');
   refreshProfileChip();
   updateAuthStatus();
   document.getElementById('app').style.display = 'none';
@@ -695,11 +696,11 @@ async function loadUserProfile() {
     const data = await apiFetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=1', { auth: true });
     const channel = data.items?.[0];
     USER_NAME = channel?.snippet?.title || 'YouTube User';
-    sessionStorage.setItem('ct_user_name', USER_NAME);
+    localStorage.setItem('ct_user_name', USER_NAME);
     refreshProfileChip();
   } catch {
     USER_NAME = 'YouTube User';
-    sessionStorage.setItem('ct_user_name', USER_NAME);
+    localStorage.setItem('ct_user_name', USER_NAME);
     refreshProfileChip();
   }
 }
@@ -1050,6 +1051,10 @@ function resetApp() {
   localStorage.clear();
   sessionStorage.clear();
   location.reload();
+}
+
+function refreshApp() {
+  window.location.reload();
 }
 
 async function loadPlaylistOptions() {
