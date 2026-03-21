@@ -580,10 +580,12 @@
 const YT_SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
 const DEFAULT_CLIENT_ID = '721056966317-6mp3i2ijg4bg7la0m4p07k0j21i1828n.apps.googleusercontent.com';
 const SHORTS_MAX_DURATION_SECS = 65;
-const FEED_CHANNEL_BATCH_SIZE = 4;
-const FEED_VIDEOS_PER_CHANNEL = 2;
+const FEED_CHANNEL_BATCH_SIZE = 3;
+const FEED_VIDEOS_PER_CHANNEL = 1;
 const FEED_CACHE_KEY = 'ct_feed_cache_v1';
 const FEED_CACHE_TTL_MS = 10 * 60 * 1000;
+const CHANNEL_UPLOADS_CACHE_PREFIX = 'ct_channel_uploads_v1:';
+const CHANNEL_UPLOADS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const SEARCH_CACHE_PREFIX = 'ct_search_cache_v1:';
 const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 let API_KEY = '';
@@ -779,19 +781,31 @@ async function loadSubscriptionFeed(append = false) {
 
 async function getChannelUploadsPlaylists(channelIds) {
   if (!channelIds.length) return {};
+
+  const cachedMap = {};
+  const missingIds = [];
+  for (const id of channelIds) {
+    const cached = getCachedChannelUploads(id);
+    if (cached) cachedMap[id] = cached;
+    else missingIds.push(id);
+  }
+
+  if (!missingIds.length) return cachedMap;
+
   try {
-    const url = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails,snippet&id=${channelIds.map(encodeURIComponent).join(',')}`;
+    const url = `https://www.googleapis.com/youtube/v3/channels?part=contentDetails,snippet&id=${missingIds.map(encodeURIComponent).join(',')}`;
     const data = await apiFetch(url, { auth: true, allowApiKeyFallback: true });
-    const map = {};
     for (const item of (data.items || [])) {
-      map[item.id] = {
+      const payload = {
         uploadsPlaylistId: item.contentDetails?.relatedPlaylists?.uploads || '',
         channelTitle: item.snippet?.title || ''
       };
+      cachedMap[item.id] = payload;
+      setCachedChannelUploads(item.id, payload);
     }
-    return map;
+    return cachedMap;
   } catch {
-    return {};
+    return cachedMap;
   }
 }
 
@@ -1180,6 +1194,32 @@ function getCachedSearch(query) {
 function setCachedSearch(query, payload) {
   try {
     sessionStorage.setItem(SEARCH_CACHE_PREFIX + query.toLowerCase(), JSON.stringify(payload));
+  } catch {
+    // ignore cache failures
+  }
+}
+
+function getCachedChannelUploads(channelId) {
+  try {
+    const raw = localStorage.getItem(CHANNEL_UPLOADS_CACHE_PREFIX + channelId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.savedAt || (Date.now() - parsed.savedAt) > CHANNEL_UPLOADS_CACHE_TTL_MS) {
+      localStorage.removeItem(CHANNEL_UPLOADS_CACHE_PREFIX + channelId);
+      return null;
+    }
+    return parsed.payload || null;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedChannelUploads(channelId, payload) {
+  try {
+    localStorage.setItem(CHANNEL_UPLOADS_CACHE_PREFIX + channelId, JSON.stringify({
+      savedAt: Date.now(),
+      payload
+    }));
   } catch {
     // ignore cache failures
   }
