@@ -584,6 +584,8 @@ const FEED_CHANNEL_BATCH_SIZE = 4;
 const FEED_VIDEOS_PER_CHANNEL = 2;
 const FEED_CACHE_KEY = 'ct_feed_cache_v1';
 const FEED_CACHE_TTL_MS = 10 * 60 * 1000;
+const SEARCH_CACHE_PREFIX = 'ct_search_cache_v1:';
+const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 let API_KEY = '';
 let CLIENT_ID = '';
 let ACCESS_TOKEN = '';
@@ -887,6 +889,7 @@ function renderSearchUI() {
       <input type="text" id="search-input" placeholder="Search YouTube…" style="flex:1" onkeydown="if(event.key==='Enter')doSearch()" autocorrect="off" autocapitalize="none" spellcheck="false">
       <button class="btn-primary" style="width:auto;padding:0 20px;flex-shrink:0;margin-top:0" onclick="doSearch()">Go</button>
     </div>
+    <div class="empty" style="padding:26px 12px"><div class="icon">🔎</div><p>Search opens first to keep quota usage low. Feed and Later are still available when you want them.</p></div>
     <div id="search-results"></div>`;
 }
 
@@ -894,6 +897,20 @@ async function doSearch() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
   const resultsEl = document.getElementById('search-results');
+
+  const cached = getCachedSearch(q);
+  if (cached) {
+    filteredShorts = cached.filteredShorts || 0;
+    updateFilteredCount();
+    resultsEl.innerHTML = '';
+    if (!cached.videos?.length) {
+      resultsEl.innerHTML = '<div class="empty"><div class="icon">🔍</div>No long-form results found.</div>';
+      return;
+    }
+    renderVideosInto(cached.videos, resultsEl, 'search');
+    return;
+  }
+
   resultsEl.innerHTML = '<div class="loader"><div class="spinner"></div>Searching…</div>';
   try {
     const urlA = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(q)}&type=video&videoDuration=medium&maxResults=25`;
@@ -917,8 +934,9 @@ async function doSearch() {
       };
     });
     const filtered = await filterShorts(videos);
-    filteredShorts += filtered.removedCount;
+    filteredShorts = filtered.removedCount;
     updateFilteredCount();
+    setCachedSearch(q, { videos: filtered.longform, filteredShorts, savedAt: Date.now() });
     if (!filtered.longform.length) {
       resultsEl.innerHTML = '<div class="empty"><div class="icon">🔍</div>No long-form results found.</div>';
       return;
@@ -991,7 +1009,7 @@ function renderVideos(videos, tabKey, append = false) {
   if (!append) {
     const header = document.createElement('div');
     header.className = 'section-header';
-    header.innerHTML = `<div class="section-title">${titles[tabKey] || ''}</div><div class="badge">Shorts removed</div>`;
+    header.innerHTML = `<div class="section-title">${titles[tabKey] || ''}</div><div style="display:flex;gap:8px;align-items:center">${tabKey === 'feed' ? '<button class="btn-secondary" style="width:auto;margin-top:0;padding:8px 12px;font-size:12px" onclick="refreshFeed(true)">Refresh Feed</button>' : ''}<div class="badge">Shorts removed</div></div>`;
     main.appendChild(header);
   }
   renderVideosInto(videos, main, tabKey);
@@ -1081,6 +1099,14 @@ function refreshApp() {
   window.location.reload();
 }
 
+function refreshFeed(force = false) {
+  if (force) sessionStorage.removeItem(FEED_CACHE_KEY);
+  filteredShorts = 0;
+  updateFilteredCount();
+  nextPageTokens.feed = '';
+  loadSubscriptionFeed(false);
+}
+
 async function loadPlaylistOptions() {
   const select = document.getElementById('settings-playlist-select');
   if (!select) return;
@@ -1131,6 +1157,29 @@ function getCachedFeed() {
 function setCachedFeed(payload) {
   try {
     sessionStorage.setItem(FEED_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore cache failures
+  }
+}
+
+function getCachedSearch(query) {
+  try {
+    const raw = sessionStorage.getItem(SEARCH_CACHE_PREFIX + query.toLowerCase());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed.savedAt || (Date.now() - parsed.savedAt) > SEARCH_CACHE_TTL_MS) {
+      sessionStorage.removeItem(SEARCH_CACHE_PREFIX + query.toLowerCase());
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedSearch(query, payload) {
+  try {
+    sessionStorage.setItem(SEARCH_CACHE_PREFIX + query.toLowerCase(), JSON.stringify(payload));
   } catch {
     // ignore cache failures
   }
