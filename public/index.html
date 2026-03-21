@@ -779,14 +779,19 @@ async function getChannelRecentVideos(channelId) {
   try {
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${encodeURIComponent(channelId)}&maxResults=5&order=date&type=video`;
     const data = await apiFetch(url, { auth: true, allowApiKeyFallback: true });
-    return data.items.map(i => ({
-      videoId: i.id.videoId,
-      title: i.snippet.title,
-      channel: i.snippet.channelTitle,
-      thumbnail: (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {}).url || '',
-      publishedAt: i.snippet.publishedAt,
-      description: i.snippet.description
-    }));
+    return data.items.map(i => {
+      const thumb = (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {});
+      return {
+        videoId: i.id.videoId,
+        title: i.snippet.title,
+        channel: i.snippet.channelTitle,
+        thumbnail: thumb.url || '',
+        thumbnailWidth: thumb.width || 0,
+        thumbnailHeight: thumb.height || 0,
+        publishedAt: i.snippet.publishedAt,
+        description: i.snippet.description
+      };
+    });
   } catch {
     return [];
   }
@@ -798,7 +803,17 @@ async function loadWatchLater(append = false) {
   }
   try {
     const pageToken = nextPageTokens.watchlater || '';
-    const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=WL&maxResults=25${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
+    let playlistId = 'WL';
+
+    try {
+      const channelData = await apiFetch('https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true&maxResults=1', { auth: true });
+      const related = channelData.items?.[0]?.contentDetails?.relatedPlaylists;
+      if (related?.watchLater) playlistId = related.watchLater;
+    } catch {
+      // ignore and fall back to WL
+    }
+
+    const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${encodeURIComponent(playlistId)}&maxResults=25${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`;
     const data = await apiFetch(url, { auth: true });
     nextPageTokens.watchlater = data.nextPageToken || null;
     const videos = data.items
@@ -808,6 +823,8 @@ async function loadWatchLater(append = false) {
         title: i.snippet.title,
         channel: i.snippet.videoOwnerChannelTitle || i.snippet.channelTitle || '',
         thumbnail: (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {}).url || '',
+        thumbnailWidth: (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {}).width || 0,
+        thumbnailHeight: (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {}).height || 0,
         publishedAt: i.contentDetails?.videoPublishedAt || i.snippet.publishedAt,
         description: i.snippet.description
       }));
@@ -816,7 +833,7 @@ async function loadWatchLater(append = false) {
     filteredShorts += filtered.removedCount;
     updateFilteredCount();
   } catch (e) {
-    showError(new Error('Watch Later failed. If this persists, double-check the OAuth scope/app mode and try signing in again.'));
+    showError(new Error(`Watch Later failed: ${e.message || 'Unknown error'}`));
   }
 }
 
@@ -842,14 +859,19 @@ async function doSearch() {
       apiFetch(urlB, { auth: hasValidToken(), allowApiKeyFallback: true })
     ]);
     const allItems = [...d1.items, ...d2.items].sort((a, b) => new Date(b.snippet.publishedAt) - new Date(a.snippet.publishedAt));
-    const videos = allItems.map(i => ({
-      videoId: i.id.videoId,
-      title: i.snippet.title,
-      channel: i.snippet.channelTitle,
-      thumbnail: (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {}).url || '',
-      publishedAt: i.snippet.publishedAt,
-      description: i.snippet.description
-    }));
+    const videos = allItems.map(i => {
+      const thumb = (i.snippet.thumbnails.high || i.snippet.thumbnails.medium || i.snippet.thumbnails.default || {});
+      return {
+        videoId: i.id.videoId,
+        title: i.snippet.title,
+        channel: i.snippet.channelTitle,
+        thumbnail: thumb.url || '',
+        thumbnailWidth: thumb.width || 0,
+        thumbnailHeight: thumb.height || 0,
+        publishedAt: i.snippet.publishedAt,
+        description: i.snippet.description
+      };
+    });
     const filtered = await filterShorts(videos);
     filteredShorts += filtered.removedCount;
     updateFilteredCount();
@@ -868,17 +890,32 @@ async function filterShorts(videos) {
   if (!videos.length) return { longform: [], removedCount: 0 };
   const ids = videos.map(v => v.videoId).join(',');
   try {
-    const data = await apiFetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${ids}`, { auth: hasValidToken(), allowApiKeyFallback: true });
-    const durationMap = Object.fromEntries(data.items.map(item => [item.id, parseDuration(item.contentDetails.duration)]));
+    const data = await apiFetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails,snippet&id=${ids}`, { auth: hasValidToken(), allowApiKeyFallback: true });
+    const infoMap = Object.fromEntries(data.items.map(item => [item.id, {
+      secs: parseDuration(item.contentDetails.duration),
+      title: item.snippet?.title || '',
+      description: item.snippet?.description || ''
+    }]));
     const longform = [];
     let removedCount = 0;
     for (const v of videos) {
-      const secs = durationMap[v.videoId];
-      if (secs == null) { longform.push(v); continue; }
-      if (secs <= SHORTS_MAX_DURATION_SECS) removedCount++;
-      else {
+      const info = infoMap[v.videoId];
+      const secs = info?.secs;
+      const title = info?.title || v.title || '';
+      const description = info?.description || v.description || '';
+      const looksVertical = v.thumbnailHeight > 0 && v.thumbnailWidth > 0 && v.thumbnailHeight > v.thumbnailWidth;
+      const flaggedByTag = /(^|\s)#shorts?(\s|$)|(^|\s)shorts?(\s|$)/i.test(`${title} ${description}`);
+      const flaggedByLength = secs != null && secs <= 180;
+      const isLikelyShort = flaggedByTag || flaggedByLength || looksVertical;
+
+      if (secs != null) {
         v.durationSecs = secs;
         v.durationLabel = formatDuration(secs);
+      }
+
+      if (isLikelyShort) {
+        removedCount++;
+      } else {
         longform.push(v);
       }
     }
