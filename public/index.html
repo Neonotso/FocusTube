@@ -226,6 +226,13 @@
     justify-content: center;
     cursor: pointer;
     font-size: 16px;
+    transition: transform .25s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease;
+  }
+  .settings-btn.spinning {
+    transform: rotate(360deg);
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 4px rgba(232,197,71,.12);
   }
   main {
     flex: 1;
@@ -573,7 +580,7 @@
       <button class="nav-tab active" onclick="switchTab('feed')" id="tab-feed">Feed</button>
     </div>
     <div class="nav-right">
-      <div class="settings-btn" onclick="refreshApp()" title="Refresh app">↻</div>
+      <div class="settings-btn" id="refresh-btn" onclick="refreshApp()" title="Refresh app">↻</div>
       <div class="settings-btn" onclick="openSettings()">⚙</div>
     </div>
   </nav>
@@ -1293,7 +1300,9 @@ function resetApp() {
 }
 
 function refreshApp() {
-  window.location.reload();
+  const btn = document.getElementById('refresh-btn');
+  btn?.classList.add('spinning');
+  setTimeout(() => window.location.reload(), 220);
 }
 
 function loadPersistedLikedVideos() {
