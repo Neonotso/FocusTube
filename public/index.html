@@ -529,6 +529,31 @@
     cursor: pointer;
     margin-top: 8px;
   }
+  .continue-card {
+    margin-top: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    cursor: pointer;
+  }
+  .continue-card img {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    display: block;
+    background: var(--surface2);
+  }
+  .continue-meta {
+    padding: 14px 16px;
+  }
+  .continue-label {
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
   .filter-strip {
     display: flex;
     align-items: center;
@@ -638,6 +663,7 @@ const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 const LAST_SEARCH_KEY = 'ct_last_search_v1';
 const LIKED_VIDEOS_KEY = 'ct_liked_videos_v1';
 const WATCH_PROGRESS_KEY = 'ct_watch_progress_v1';
+const LAST_WATCHED_VIDEO_KEY = 'ct_last_watched_video_v1';
 let API_KEY = '';
 let CLIENT_ID = '';
 let ACCESS_TOKEN = '';
@@ -1027,13 +1053,15 @@ async function loadWatchLater(append = false) {
 
 function renderSearchUI() {
   const lastQuery = sessionStorage.getItem(LAST_SEARCH_KEY) || '';
+  const lastWatched = getLastWatchedVideo();
   document.getElementById('main-content').innerHTML = `
     <div class="search-wrap">
       <input type="text" id="search-input" placeholder="Search YouTube…" value="${escHtml(lastQuery)}" style="flex:1" onkeydown="if(event.key==='Enter')doSearch()" autocorrect="off" autocapitalize="none" spellcheck="false">
       <button class="btn-primary" style="width:auto;padding:0 20px;flex-shrink:0;margin-top:0" onclick="doSearch()">Go</button>
     </div>
     <div id="search-empty-state" class="empty" style="padding:26px 12px"><div class="icon">🔎</div><p>Search opens first to keep quota usage low. Feed and Later are still available when you want them.</p></div>
-    <div id="search-results"></div>`;
+    <div id="search-results"></div>
+    <div id="continue-watching"></div>`;
 
   if (lastQuery) {
     const cached = getCachedSearch(lastQuery);
@@ -1048,6 +1076,10 @@ function renderSearchUI() {
         renderVideosInto(cached.videos, resultsEl, 'search');
       }
     }
+  }
+
+  if (lastWatched?.videoId) {
+    renderContinueWatching(lastWatched);
   }
 }
 
@@ -1223,6 +1255,7 @@ function renderVideosInto(videos, container, tabKey) {
 function playVideo(v) {
   const lastTime = getWatchProgress(v.videoId);
   currentPlayingVideo = v;
+  setLastWatchedVideo(v);
   document.getElementById('playing-title').textContent = v.title;
   document.getElementById('playing-channel').textContent = v.channel || '';
   document.getElementById('player-header-title').textContent = v.title;
@@ -1332,6 +1365,29 @@ function getWatchProgressMap() {
   }
 }
 
+function getLastWatchedVideo() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_WATCHED_VIDEO_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function setLastWatchedVideo(video) {
+  if (!video?.videoId) return;
+  try {
+    localStorage.setItem(LAST_WATCHED_VIDEO_KEY, JSON.stringify({
+      videoId: video.videoId,
+      title: video.title || '',
+      channel: video.channel || '',
+      thumbnail: video.thumbnail || '',
+      timestamp: getWatchProgress(video.videoId) || 0
+    }));
+  } catch {
+    // ignore storage failures
+  }
+}
+
 function getWatchProgress(videoId) {
   const map = getWatchProgressMap();
   return Number(map[videoId] || 0);
@@ -1346,6 +1402,9 @@ function setWatchProgress(videoId, seconds) {
     localStorage.setItem(WATCH_PROGRESS_KEY, JSON.stringify(map));
   } catch {
     // ignore storage failures
+  }
+  if (currentPlayingVideo?.videoId === videoId) {
+    setLastWatchedVideo({ ...currentPlayingVideo, timestamp: safeSeconds });
   }
 }
 
@@ -1408,6 +1467,28 @@ function initYouTubePlayer(videoId, startSeconds = 0) {
       }
     }
   });
+}
+
+function renderContinueWatching(video) {
+  const container = document.getElementById('continue-watching');
+  if (!container || !video?.videoId) return;
+  const timestamp = Number(video.timestamp || getWatchProgress(video.videoId) || 0);
+  const timestampLabel = formatDuration(timestamp);
+  container.innerHTML = `
+    <div class="continue-card" onclick='resumeLastWatched()'>
+      <img src="${escAttr(video.thumbnail || '')}" alt="">
+      <div class="continue-meta">
+        <div class="continue-label">Continue Watching?</div>
+        <div class="video-title">${escHtml(video.title || 'Last watched video')}</div>
+        <div class="video-sub"><span>${escHtml(video.channel || '')}</span><span>${timestamp > 0 ? `Resume at ${timestampLabel}` : 'Resume video'}</span></div>
+      </div>
+    </div>`;
+}
+
+function resumeLastWatched() {
+  const video = getLastWatchedVideo();
+  if (!video?.videoId) return;
+  playVideo(video);
 }
 
 function refreshFeed(force = false) {
