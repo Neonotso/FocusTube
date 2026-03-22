@@ -1317,7 +1317,16 @@ async function saveToLater(videoId, btn) {
     savedLaterVideoIds.add(videoId);
     clearPersistentError();
     const successDetails = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nplaylist=${LATER_PLAYLIST.name || '(unknown)'}\nplaylistId=${LATER_PLAYLIST.id}\nvideoId=${videoId}\ninsertedPlaylistItemId=${body?.id || '(missing)'}\nverified=true`;
-    showPersistentSuccess(`Saved to Later: ${LATER_PLAYLIST.name || LATER_PLAYLIST.id}`, successDetails);
+    const playlistUrl = `https://www.youtube.com/playlist?list=${encodeURIComponent(LATER_PLAYLIST.id)}`;
+    const playlistVideoUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}&list=${encodeURIComponent(LATER_PLAYLIST.id)}`;
+    showPersistentSuccess(
+      `Saved to Later: ${LATER_PLAYLIST.name || LATER_PLAYLIST.id}`,
+      successDetails,
+      [
+        { label: 'Open playlist', href: playlistUrl },
+        { label: 'Open video in playlist', href: playlistVideoUrl }
+      ]
+    );
     if (btn) {
       btn.textContent = '✓ Saved';
       btn.classList.add('saved');
@@ -1564,7 +1573,7 @@ function showPersistentError(msg, details = '') {
   box.innerHTML = `<strong>Save failed</strong><br>${escHtml(msg)}${details ? `<br><br><code style="white-space:pre-wrap;word-break:break-word;display:block">${escHtml(details)}</code>` : ''}`;
   main.prepend(box);
 }
-function showPersistentSuccess(msg, details = '') {
+function showPersistentSuccess(msg, details = '', links = []) {
   const main = document.getElementById('main-content');
   if (!main) return;
   const existing = document.getElementById('persistent-error');
@@ -1572,7 +1581,10 @@ function showPersistentSuccess(msg, details = '') {
   const box = document.createElement('div');
   box.id = 'persistent-error';
   box.style.cssText = 'margin-bottom:16px;padding:12px 14px;border:1px solid var(--green);background:rgba(87,211,140,.08);color:var(--text);border-radius:12px;font-size:13px;line-height:1.5;';
-  box.innerHTML = `<strong>Save debug</strong><br>${escHtml(msg)}${details ? `<br><br><code style="white-space:pre-wrap;word-break:break-word;display:block">${escHtml(details)}</code>` : ''}`;
+  const linksHtml = links.length
+    ? `<div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">${links.map(link => `<a href="${escAttr(link.href)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent2);text-decoration:none">${escHtml(link.label)} ↗</a>`).join('')}</div>`
+    : '';
+  box.innerHTML = `<strong>Save debug</strong><br>${escHtml(msg)}${details ? `<br><br><code style="white-space:pre-wrap;word-break:break-word;display:block">${escHtml(details)}</code>` : ''}${linksHtml}`;
   main.prepend(box);
 }
 function clearPersistentError() {
@@ -1586,6 +1598,9 @@ function showToast(msg) {
 }
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function relativeTime(date) {
   const diff = (Date.now() - date.getTime()) / 1000;
