@@ -1092,13 +1092,12 @@ async function filterShorts(videos) {
   if (!videos.length) return { longform: [], removedCount: 0 };
   const ids = videos.map(v => v.videoId).join(',');
   try {
-    const parts = hasValidToken() ? 'contentDetails,snippet,myRating' : 'contentDetails,snippet';
+    const parts = 'contentDetails,snippet';
     const data = await apiFetch(`https://www.googleapis.com/youtube/v3/videos?part=${parts}&id=${ids}`, { auth: hasValidToken(), allowApiKeyFallback: true });
     const infoMap = Object.fromEntries(data.items.map(item => [item.id, {
       secs: parseDuration(item.contentDetails.duration),
       title: item.snippet?.title || '',
-      description: item.snippet?.description || '',
-      myRating: item.myRating || 'none'
+      description: item.snippet?.description || ''
     }]));
     const longform = [];
     let removedCount = 0;
@@ -1107,7 +1106,6 @@ async function filterShorts(videos) {
       const secs = info?.secs;
       const title = info?.title || v.title || '';
       const description = info?.description || v.description || '';
-      const myRating = info?.myRating || 'none';
       const looksVertical = v.thumbnailHeight > 0 && v.thumbnailWidth > 0 && v.thumbnailHeight > v.thumbnailWidth;
       const flaggedByTag = /(^|\s)#shorts?(\s|$)|(^|\s)shorts?(\s|$)/i.test(`${title} ${description}`);
       const flaggedByLength = secs != null && secs <= 180;
@@ -1116,9 +1114,6 @@ async function filterShorts(videos) {
       if (secs != null) {
         v.durationSecs = secs;
         v.durationLabel = formatDuration(secs);
-      }
-      if (myRating === 'like') {
-        likedVideoIds.add(v.videoId);
       }
 
       if (isLikelyShort) {
@@ -1162,6 +1157,7 @@ function renderVideos(videos, tabKey, append = false) {
 }
 
 function renderVideosInto(videos, container, tabKey) {
+  hydrateLikedStateForVideos(videos);
   let grid = container.querySelector('.video-grid');
   if (!grid) {
     grid = document.createElement('div');
@@ -1370,7 +1366,7 @@ async function likeVideo(videoId, btn) {
 
 async function verifyVideoLiked(videoId) {
   try {
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=myRating&id=${encodeURIComponent(videoId)}`, {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&id=${encodeURIComponent(videoId)}`, {
       headers: {
         'Authorization': `Bearer ${ACCESS_TOKEN}`
       }
@@ -1382,7 +1378,7 @@ async function verifyVideoLiked(videoId) {
       status,
       ok,
       body,
-      myRating: body?.items?.[0]?.myRating || (ok ? 'none' : 'error')
+      myRating: ok && Array.isArray(body?.items) && body.items.some(item => item.id === videoId) ? 'like' : (ok ? 'none' : 'error')
     };
   } catch {
     return {
@@ -1392,6 +1388,33 @@ async function verifyVideoLiked(videoId) {
       myRating: 'error'
     };
   }
+}
+
+function hydrateLikedStateForVideos(videos) {
+  if (!hasValidToken() || !videos?.length) return;
+  const ids = videos.map(v => v.videoId).filter(Boolean);
+  if (!ids.length) return;
+  fetch(`https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&id=${encodeURIComponent(ids.join(','))}`, {
+    headers: {
+      'Authorization': `Bearer ${ACCESS_TOKEN}`
+    }
+  })
+    .then(async (res) => {
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      for (const item of (body.items || [])) {
+        if (item.id) likedVideoIds.add(item.id);
+      }
+      persistLikedVideos();
+      rerenderCurrentTabButtons();
+    })
+    .catch(() => {});
+}
+
+function rerenderCurrentTabButtons() {
+  if (currentTab === 'search') renderSearchUI();
+  else if (currentTab === 'watchlater') loadWatchLater(false);
+  else if (currentTab === 'feed') loadSubscriptionFeed(false);
 }
 
 async function saveToLater(videoId, btn) {
