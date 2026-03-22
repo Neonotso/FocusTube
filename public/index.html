@@ -551,7 +551,7 @@
 
   <div class="steps">
     <div class="step"><div class="step-num">1</div><p>Use the Firebase URL you already configured as an <strong>Authorized JavaScript origin</strong>.</p></div>
-    <div class="step"><div class="step-num">2</div><p>Use scope <code>https://www.googleapis.com/auth/youtube</code> so the app can read your account and save videos to your Later playlist.</p></div>
+    <div class="step"><div class="step-num">2</div><p>Use scope <code>https://www.googleapis.com/auth/youtube.force-ssl</code> so the app can read your account and perform write actions like saving to Later and liking videos.</p></div>
     <div class="step"><div class="step-num">3</div><p>After signing in, CleanTube will load your subscriptions and try YouTube's special Watch Later list first. If that fails, you can use your own playlist as the <strong>Later</strong> queue.</p></div>
     <div class="step"><div class="step-num">4</div><p>On iPhone, tap <strong>Share → Add to Home Screen</strong> for the best app-like experience.</p></div>
   </div>
@@ -609,7 +609,7 @@
 <div id="toast"></div>
 
 <script>
-const YT_SCOPE = 'https://www.googleapis.com/auth/youtube';
+const YT_SCOPE = 'https://www.googleapis.com/auth/youtube.force-ssl';
 const DEFAULT_CLIENT_ID = '721056966317-6mp3i2ijg4bg7la0m4p07k0j21i1828n.apps.googleusercontent.com';
 const SHORTS_MAX_DURATION_SECS = 65;
 const FEED_CHANNEL_BATCH_SIZE = 3;
