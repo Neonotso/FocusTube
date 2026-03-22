@@ -1157,7 +1157,6 @@ function renderVideos(videos, tabKey, append = false) {
 }
 
 function renderVideosInto(videos, container, tabKey) {
-  hydrateLikedStateForVideos(videos);
   let grid = container.querySelector('.video-grid');
   if (!grid) {
     grid = document.createElement('div');
@@ -1309,11 +1308,6 @@ async function likeVideo(videoId, btn) {
     btn.textContent = 'Liking…';
   }
 
-  let rateStatus = null;
-  let rateOk = false;
-  let rateBody = null;
-  let verifyResult = null;
-
   try {
     const res = await fetch(`https://www.googleapis.com/youtube/v3/videos/rate?id=${encodeURIComponent(videoId)}&rating=like`, {
       method: 'POST',
@@ -1322,28 +1316,16 @@ async function likeVideo(videoId, btn) {
       }
     });
 
-    rateStatus = res.status;
-    rateOk = res.ok;
-
     if (!res.ok) {
-      rateBody = await res.json().catch(() => ({}));
-      const apiMessage = rateBody?.error?.message || `HTTP ${res.status}`;
-      const apiReason = rateBody?.error?.errors?.[0]?.reason || '';
+      const body = await res.json().catch(() => ({}));
+      const apiMessage = body?.error?.message || `HTTP ${res.status}`;
+      const apiReason = body?.error?.errors?.[0]?.reason || '';
       throw new Error(apiReason ? `${apiMessage} [${apiReason}]` : apiMessage);
-    }
-
-    verifyResult = await verifyVideoLiked(videoId);
-    if (verifyResult.myRating !== 'like') {
-      throw new Error('Like not confirmed by YouTube');
     }
 
     likedVideoIds.add(videoId);
     persistLikedVideos();
-    const details = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}\nrateStatus=${rateStatus}\nrateOk=${rateOk}\nverifyStatus=${verifyResult.status}\nverifyOk=${verifyResult.ok}\nverifiedMyRating=${verifyResult.myRating}${verifyResult.body ? `\nverifyBody=${JSON.stringify(verifyResult.body)}` : ''}`;
-    console.log('Like debug success', { videoId, rateStatus, rateOk, verifyResult, channelId: USER_CHANNEL_ID });
-    showPersistentSuccess('Like confirmed', details, [
-      { label: 'Open video on YouTube', href: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}` }
-    ]);
+    clearPersistentError();
     if (btn) {
       btn.textContent = '♥ Liked';
       btn.classList.add('liked');
@@ -1352,70 +1334,14 @@ async function likeVideo(videoId, btn) {
     showToast('Video liked');
   } catch (e) {
     const msg = e.message || 'Unknown error';
-    const details = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}\nrateStatus=${rateStatus ?? '(none)'}\nrateOk=${rateOk}${verifyResult ? `\nverifyStatus=${verifyResult.status}\nverifyOk=${verifyResult.ok}` : ''}\nverifiedMyRating=${verifyResult ? verifyResult.myRating : 'unknown'}${rateBody ? `\nrateBody=${JSON.stringify(rateBody)}` : ''}${verifyResult?.body ? `\nverifyBody=${JSON.stringify(verifyResult.body)}` : ''}`;
-    console.error('Like debug failure', { videoId, rateStatus, rateOk, verifyResult, rateBody, channelId: USER_CHANNEL_ID, message: msg });
     showToast(`Could not like: ${msg}`);
-    showPersistentError(`Could not like: ${msg}`, details);
+    showPersistentError(`Could not like: ${msg}`, `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}`);
     if (btn) {
       btn.disabled = false;
       btn.textContent = originalText || '♥ Like';
       btn.classList.remove('liked');
     }
   }
-}
-
-async function verifyVideoLiked(videoId) {
-  try {
-    const res = await fetch('https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&maxResults=50', {
-      headers: {
-        'Authorization': `Bearer ${ACCESS_TOKEN}`
-      }
-    });
-    const status = res.status;
-    const ok = res.ok;
-    const body = await res.json().catch(() => ({}));
-    const likedIds = new Set((body?.items || []).map(item => item.id).filter(Boolean));
-    return {
-      status,
-      ok,
-      body,
-      myRating: ok ? (likedIds.has(videoId) ? 'like' : 'none') : 'error'
-    };
-  } catch {
-    return {
-      status: null,
-      ok: false,
-      body: null,
-      myRating: 'error'
-    };
-  }
-}
-
-function hydrateLikedStateForVideos(videos) {
-  if (!hasValidToken() || !videos?.length) return;
-  const ids = new Set(videos.map(v => v.videoId).filter(Boolean));
-  if (!ids.size) return;
-  fetch('https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&maxResults=50', {
-    headers: {
-      'Authorization': `Bearer ${ACCESS_TOKEN}`
-    }
-  })
-    .then(async (res) => {
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) return;
-      for (const item of (body.items || [])) {
-        if (item.id && ids.has(item.id)) likedVideoIds.add(item.id);
-      }
-      persistLikedVideos();
-      rerenderCurrentTabButtons();
-    })
-    .catch(() => {});
-}
-
-function rerenderCurrentTabButtons() {
-  if (currentTab === 'search') renderSearchUI();
-  else if (currentTab === 'watchlater') loadWatchLater(false);
-  else if (currentTab === 'feed') loadSubscriptionFeed(false);
 }
 
 async function saveToLater(videoId, btn) {
