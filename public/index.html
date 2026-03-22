@@ -1366,7 +1366,7 @@ async function likeVideo(videoId, btn) {
 
 async function verifyVideoLiked(videoId) {
   try {
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&id=${encodeURIComponent(videoId)}`, {
+    const res = await fetch('https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&maxResults=50', {
       headers: {
         'Authorization': `Bearer ${ACCESS_TOKEN}`
       }
@@ -1374,11 +1374,12 @@ async function verifyVideoLiked(videoId) {
     const status = res.status;
     const ok = res.ok;
     const body = await res.json().catch(() => ({}));
+    const likedIds = new Set((body?.items || []).map(item => item.id).filter(Boolean));
     return {
       status,
       ok,
       body,
-      myRating: ok && Array.isArray(body?.items) && body.items.some(item => item.id === videoId) ? 'like' : (ok ? 'none' : 'error')
+      myRating: ok ? (likedIds.has(videoId) ? 'like' : 'none') : 'error'
     };
   } catch {
     return {
@@ -1392,9 +1393,9 @@ async function verifyVideoLiked(videoId) {
 
 function hydrateLikedStateForVideos(videos) {
   if (!hasValidToken() || !videos?.length) return;
-  const ids = videos.map(v => v.videoId).filter(Boolean);
-  if (!ids.length) return;
-  fetch(`https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&id=${encodeURIComponent(ids.join(','))}`, {
+  const ids = new Set(videos.map(v => v.videoId).filter(Boolean));
+  if (!ids.size) return;
+  fetch('https://www.googleapis.com/youtube/v3/videos?part=id&myRating=like&maxResults=50', {
     headers: {
       'Authorization': `Bearer ${ACCESS_TOKEN}`
     }
@@ -1403,7 +1404,7 @@ function hydrateLikedStateForVideos(videos) {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) return;
       for (const item of (body.items || [])) {
-        if (item.id) likedVideoIds.add(item.id);
+        if (item.id && ids.has(item.id)) likedVideoIds.add(item.id);
       }
       persistLikedVideos();
       rerenderCurrentTabButtons();
