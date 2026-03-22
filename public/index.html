@@ -1316,7 +1316,7 @@ async function likeVideo(videoId, btn) {
   let rateStatus = null;
   let rateOk = false;
   let rateBody = null;
-  let verifiedRating = 'unknown';
+  let verifyResult = null;
 
   try {
     const res = await fetch(`https://www.googleapis.com/youtube/v3/videos/rate?id=${encodeURIComponent(videoId)}&rating=like`, {
@@ -1336,16 +1336,15 @@ async function likeVideo(videoId, btn) {
       throw new Error(apiReason ? `${apiMessage} [${apiReason}]` : apiMessage);
     }
 
-    const verify = await verifyVideoLiked(videoId);
-    verifiedRating = verify.myRating;
-    if (verifiedRating !== 'like') {
+    verifyResult = await verifyVideoLiked(videoId);
+    if (verifyResult.myRating !== 'like') {
       throw new Error('Like not confirmed by YouTube');
     }
 
     likedVideoIds.add(videoId);
     persistLikedVideos();
-    const details = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}\nrateStatus=${rateStatus}\nrateOk=${rateOk}\nverifyStatus=${verify.status}\nverifyOk=${verify.ok}\nverifiedMyRating=${verifiedRating}${verify.body ? `\nverifyBody=${JSON.stringify(verify.body)}` : ''}`;
-    console.log('Like debug success', { videoId, rateStatus, rateOk, verify, channelId: USER_CHANNEL_ID });
+    const details = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}\nrateStatus=${rateStatus}\nrateOk=${rateOk}\nverifyStatus=${verifyResult.status}\nverifyOk=${verifyResult.ok}\nverifiedMyRating=${verifyResult.myRating}${verifyResult.body ? `\nverifyBody=${JSON.stringify(verifyResult.body)}` : ''}`;
+    console.log('Like debug success', { videoId, rateStatus, rateOk, verifyResult, channelId: USER_CHANNEL_ID });
     showPersistentSuccess('Like confirmed', details, [
       { label: 'Open video on YouTube', href: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}` }
     ]);
@@ -1357,9 +1356,8 @@ async function likeVideo(videoId, btn) {
     showToast('Video liked');
   } catch (e) {
     const msg = e.message || 'Unknown error';
-    const verify = typeof verifiedRating === 'object' && verifiedRating !== null ? verifiedRating : null;
-    const details = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}\nrateStatus=${rateStatus ?? '(none)'}\nrateOk=${rateOk}${verify ? `\nverifyStatus=${verify.status}\nverifyOk=${verify.ok}` : ''}\nverifiedMyRating=${verify ? verify.myRating : verifiedRating}${rateBody ? `\nrateBody=${JSON.stringify(rateBody)}` : ''}${verify?.body ? `\nverifyBody=${JSON.stringify(verify.body)}` : ''}`;
-    console.error('Like debug failure', { videoId, rateStatus, rateOk, verifiedRating, rateBody, channelId: USER_CHANNEL_ID, message: msg });
+    const details = `channel=${USER_NAME || '(unknown)'}\nchannelId=${USER_CHANNEL_ID || '(unknown)'}\nvideoId=${videoId}\nrateStatus=${rateStatus ?? '(none)'}\nrateOk=${rateOk}${verifyResult ? `\nverifyStatus=${verifyResult.status}\nverifyOk=${verifyResult.ok}` : ''}\nverifiedMyRating=${verifyResult ? verifyResult.myRating : 'unknown'}${rateBody ? `\nrateBody=${JSON.stringify(rateBody)}` : ''}${verifyResult?.body ? `\nverifyBody=${JSON.stringify(verifyResult.body)}` : ''}`;
+    console.error('Like debug failure', { videoId, rateStatus, rateOk, verifyResult, rateBody, channelId: USER_CHANNEL_ID, message: msg });
     showToast(`Could not like: ${msg}`);
     showPersistentError(`Could not like: ${msg}`, details);
     if (btn) {
