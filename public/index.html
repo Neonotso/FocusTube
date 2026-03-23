@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="CleanTube">
+<meta name="apple-mobile-web-app-title" content="FocusTube">
 <meta name="theme-color" content="#0a0a0f">
-<title>CleanTube — No Shorts</title>
+<title>FocusTube — No Shorts</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -576,7 +576,7 @@
 </head>
 <body>
 <div id="setup-screen">
-  <div class="logo">CleanTube</div>
+  <div class="logo">FocusTube</div>
   <div class="tagline">YouTube — Shorts Removed</div>
 
   <div class="setup-card">
@@ -597,14 +597,14 @@
   <div class="steps">
     <div class="step"><div class="step-num">1</div><p>Use the Firebase URL you already configured as an <strong>Authorized JavaScript origin</strong>.</p></div>
     <div class="step"><div class="step-num">2</div><p>Use scope <code>https://www.googleapis.com/auth/youtube.force-ssl</code> so the app can read your account and perform write actions like saving to Later and liking videos.</p></div>
-    <div class="step"><div class="step-num">3</div><p>After signing in, CleanTube will load your subscriptions and try YouTube's special Watch Later list first. If that fails, you can use your own playlist as the <strong>Later</strong> queue.</p></div>
+    <div class="step"><div class="step-num">3</div><p>After signing in, FocusTube will load your subscriptions and try YouTube's special Watch Later list first. If that fails, you can use your own playlist as the <strong>Later</strong> queue.</p></div>
     <div class="step"><div class="step-num">4</div><p>On iPhone, tap <strong>Share → Add to Home Screen</strong> for the best app-like experience.</p></div>
   </div>
 </div>
 
 <div id="app">
   <nav>
-    <div class="nav-logo">CleanTube</div>
+    <div class="nav-logo">FocusTube</div>
     <div class="nav-tabs">
       <button class="nav-tab" onclick="switchTab('search')" id="tab-search">Search</button>
       <button class="nav-tab" onclick="switchTab('watchlater')" id="tab-watchlater">Later</button>
@@ -629,7 +629,6 @@
     <div id="playing-title"></div>
     <div id="playing-channel"></div>
     <div class="player-actions" id="player-actions"></div>
-    <div class="bg-audio-notice"><strong>Background Audio Tip:</strong> Keep the page open after pressing play. Add to Home Screen on iPhone for the best odds of uninterrupted audio.</div>
   </div>
 </div>
 
@@ -648,7 +647,7 @@
     <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
     <button class="btn-secondary" onclick="signInYouTube()">Refresh Google Login</button>
     <button class="btn-secondary" onclick="signOutYouTube()">Sign Out</button>
-    <button class="btn-danger" onclick="resetApp()">Reset CleanTube</button>
+    <button class="btn-danger" onclick="resetApp()">Reset FocusTube</button>
   </div>
 </div>
 
@@ -1339,7 +1338,7 @@ async function saveSettings() {
   showToast(`Settings saved${LATER_PLAYLIST.name ? ` — Later: ${LATER_PLAYLIST.name}` : ''}`);
 }
 function resetApp() {
-  if (!confirm('Reset CleanTube completely?')) return;
+  if (!confirm('Reset FocusTube completely?')) return;
   localStorage.clear();
   sessionStorage.clear();
   likedVideoIds.clear();
