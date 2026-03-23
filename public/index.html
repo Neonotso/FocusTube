@@ -678,6 +678,7 @@ const SEARCH_HISTORY_LIMIT = 5;
 const LIKED_VIDEOS_KEY = 'ct_liked_videos_v1';
 const WATCH_PROGRESS_KEY = 'ct_watch_progress_v1';
 const LAST_WATCHED_VIDEO_KEY = 'ct_last_watched_video_v1';
+const REFRESH_TOKEN_KEY = 'ct_refresh_token_v1';
 let API_KEY = '';
 let CLIENT_ID = '';
 let ACCESS_TOKEN = '';
@@ -721,7 +722,12 @@ const likedVideoIds = new Set();
 
   if (CLIENT_ID) {
     try {
-      const refreshed = await trySilentSignIn();
+      // First try: use stored refresh token for silent re-auth (cold start)
+      let refreshed = await tryRefreshToken();
+      // Second try: fallback to Google silent sign-in
+      if (!refreshed) {
+        refreshed = await trySilentSignIn();
+      }
       if (refreshed) {
         showApp();
         refreshProfileChip();
@@ -775,6 +781,10 @@ function ensureTokenClient() {
         TOKEN_EXPIRY = Date.now() + ((resp.expires_in || 3600) * 1000) - 15000;
         localStorage.setItem('ct_access_token', ACCESS_TOKEN);
         localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
+        // Save refresh token if provided for offline access
+        if (resp.refresh_token) {
+          localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token);
+        }
         await loadUserProfile();
         updateAuthStatus();
         showApp();
@@ -788,7 +798,8 @@ function ensureTokenClient() {
 function signInYouTube() {
   try {
     ensureTokenClient();
-    tokenClient.requestAccessToken({ prompt: hasValidToken() ? '' : 'consent' });
+    // Request offline access to get refresh token for persistent sessions
+    tokenClient.requestAccessToken({ access_type: 'offline', prompt: hasValidToken() ? '' : 'consent' });
   } catch (e) {
     showToast(e.message || 'Unable to start Google sign-in');
   }
@@ -813,16 +824,58 @@ async function trySilentSignIn() {
           TOKEN_EXPIRY = Date.now() + ((resp.expires_in || 3600) * 1000) - 15000;
           localStorage.setItem('ct_access_token', ACCESS_TOKEN);
           localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
+          // Save refresh token for offline access
+          if (resp.refresh_token) {
+            localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token);
+          }
           await loadUserProfile();
           updateAuthStatus();
           resolve(true);
         }
       });
-      tokenClient.requestAccessToken({ prompt: '' });
+      // Request offline access to get refresh token
+      tokenClient.requestAccessToken({ access_type: 'offline', prompt: '' });
     } catch {
       resolve(false);
     }
   });
+}
+
+// Try to refresh access token using stored refresh token (offline access)
+async function tryRefreshToken() {
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!refreshToken || !CLIENT_ID) return false;
+
+  try {
+    // Use Google's token endpoint directly
+    const resp = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: CLIENT_ID,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      })
+    });
+
+    if (!resp.ok) return false;
+
+    const data = await resp.json();
+    if (!data.access_token) return false;
+
+    ACCESS_TOKEN = data.access_token;
+    TOKEN_EXPIRY = Date.now() + ((data.expires_in || 3600) * 1000) - 15000;
+    localStorage.setItem('ct_access_token', ACCESS_TOKEN);
+    localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
+
+    await loadUserProfile();
+    updateAuthStatus();
+    return true;
+  } catch {
+    // Clear invalid refresh token on failure
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
+    return false;
+  }
 }
 
 function waitForGoogleLibrary(timeoutMs = 5000) {
