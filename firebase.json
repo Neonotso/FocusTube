@@ -1,4 +1,7 @@
 {
+  "functions": {
+    "source": "functions"
+  },
   "hosting": {
     "public": "public",
     "ignore": [
@@ -28,10 +31,22 @@
     ],
     "rewrites": [
       {
+        "source": "/api/exchangeYouTubeCode",
+        "function": "exchangeYouTubeCode"
+      },
+      {
+        "source": "/api/youtubeAccessToken",
+        "function": "youtubeAccessToken"
+      },
+      {
+        "source": "/api/revokeYouTubeSession",
+        "function": "revokeYouTubeSession"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
     ],
-    "site": "focustube"
+    "target": "focustube"
   }
 }

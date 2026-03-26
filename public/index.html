@@ -678,7 +678,7 @@ const SEARCH_HISTORY_LIMIT = 5;
 const LIKED_VIDEOS_KEY = 'ct_liked_videos_v1';
 const WATCH_PROGRESS_KEY = 'ct_watch_progress_v1';
 const LAST_WATCHED_VIDEO_KEY = 'ct_last_watched_video_v1';
-const REFRESH_TOKEN_KEY = 'ct_refresh_token_v1';
+const SESSION_ID_KEY = 'ct_session_id_v1';
 let API_KEY = '';
 let CLIENT_ID = '';
 let ACCESS_TOKEN = '';
@@ -690,6 +690,7 @@ let currentTab = 'search';
 let nextPageTokens = {};
 let filteredShorts = 0;
 let tokenClient = null;
+let SESSION_ID = '';
 let currentPlayingVideo = null;
 let playbackSaveTimer = null;
 let ytPlayer = null;
@@ -703,6 +704,8 @@ const likedVideoIds = new Set();
   ACCESS_TOKEN = localStorage.getItem('ct_access_token') || '';
   TOKEN_EXPIRY = Number(localStorage.getItem('ct_token_expiry') || 0);
   USER_NAME = localStorage.getItem('ct_user_name') || '';
+  SESSION_ID = localStorage.getItem(SESSION_ID_KEY) || crypto.randomUUID();
+  localStorage.setItem(SESSION_ID_KEY, SESSION_ID);
   USER_CHANNEL_ID = localStorage.getItem('ct_user_channel_id') || '';
   LATER_PLAYLIST = {
     id: localStorage.getItem('ct_later_playlist_id') || '',
@@ -722,9 +725,7 @@ const likedVideoIds = new Set();
 
   if (CLIENT_ID) {
     try {
-      // First try: use stored refresh token for silent re-auth (cold start)
-      let refreshed = await tryRefreshToken();
-      // Second try: fallback to Google silent sign-in
+      let refreshed = await tryBackendRefreshToken();
       if (!refreshed) {
         refreshed = await trySilentSignIn();
       }
@@ -761,7 +762,7 @@ function saveOptionalApiKey() {
   showToast(API_KEY ? 'API key saved' : 'API key cleared');
 }
 
-function ensureTokenClient() {
+function ensureCodeClient() {
   if (!CLIENT_ID) {
     throw new Error('Save your Google OAuth Client ID first');
   }
@@ -769,21 +770,19 @@ function ensureTokenClient() {
     throw new Error('Google sign-in library not loaded yet');
   }
   if (!tokenClient) {
-    tokenClient = google.accounts.oauth2.initTokenClient({
+    tokenClient = google.accounts.oauth2.initCodeClient({
       client_id: CLIENT_ID,
       scope: YT_SCOPE,
+      ux_mode: 'popup',
       callback: async (resp) => {
-        if (resp.error) {
-          showToast(resp.error);
+        if (resp.error || !resp.code) {
+          showToast(resp.error || 'Google sign-in failed');
           return;
         }
-        ACCESS_TOKEN = resp.access_token;
-        TOKEN_EXPIRY = Date.now() + ((resp.expires_in || 3600) * 1000) - 15000;
-        localStorage.setItem('ct_access_token', ACCESS_TOKEN);
-        localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
-        // Save refresh token if provided for offline access
-        if (resp.refresh_token) {
-          localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token);
+        const ok = await exchangeCodeForSession(resp.code);
+        if (!ok) {
+          showToast('Could not complete server sign-in');
+          return;
         }
         await loadUserProfile();
         updateAuthStatus();
@@ -797,83 +796,74 @@ function ensureTokenClient() {
 
 function signInYouTube() {
   try {
-    ensureTokenClient();
-    // Request offline access to get refresh token for persistent sessions
-    tokenClient.requestAccessToken({ access_type: 'offline', prompt: hasValidToken() ? '' : 'consent' });
+    ensureCodeClient();
+    tokenClient.requestCode();
   } catch (e) {
     showToast(e.message || 'Unable to start Google sign-in');
   }
 }
 
-async function trySilentSignIn() {
-  if (!CLIENT_ID) return false;
-  if (!window.google || !google.accounts || !google.accounts.oauth2) {
-    await waitForGoogleLibrary();
+async function exchangeCodeForSession(code) {
+  if (!code || !SESSION_ID) return false;
+  try {
+    const resp = await fetch('/api/exchangeYouTubeCode', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-FocusTube-Session': SESSION_ID
+      },
+      body: JSON.stringify({ sessionId: SESSION_ID, code })
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    if (!data.accessToken) return false;
+    ACCESS_TOKEN = data.accessToken;
+    TOKEN_EXPIRY = Date.now() + ((data.expiresIn || 3600) * 1000) - 15000;
+    USER_NAME = data.userName || USER_NAME || 'YouTube User';
+    USER_CHANNEL_ID = data.userChannelId || USER_CHANNEL_ID || '';
+    localStorage.setItem('ct_access_token', ACCESS_TOKEN);
+    localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
+    localStorage.setItem('ct_user_name', USER_NAME);
+    if (USER_CHANNEL_ID) localStorage.setItem('ct_user_channel_id', USER_CHANNEL_ID);
+    return true;
+  } catch {
+    return false;
   }
-  return new Promise((resolve) => {
-    try {
-      tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: CLIENT_ID,
-        scope: YT_SCOPE,
-        callback: async (resp) => {
-          if (resp.error || !resp.access_token) {
-            resolve(false);
-            return;
-          }
-          ACCESS_TOKEN = resp.access_token;
-          TOKEN_EXPIRY = Date.now() + ((resp.expires_in || 3600) * 1000) - 15000;
-          localStorage.setItem('ct_access_token', ACCESS_TOKEN);
-          localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
-          // Save refresh token for offline access
-          if (resp.refresh_token) {
-            localStorage.setItem(REFRESH_TOKEN_KEY, resp.refresh_token);
-          }
-          await loadUserProfile();
-          updateAuthStatus();
-          resolve(true);
-        }
-      });
-      // Request offline access to get refresh token
-      tokenClient.requestAccessToken({ access_type: 'offline', prompt: '' });
-    } catch {
-      resolve(false);
-    }
-  });
 }
 
-// Try to refresh access token using stored refresh token (offline access)
-async function tryRefreshToken() {
-  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-  if (!refreshToken || !CLIENT_ID) return false;
+async function trySilentSignIn() {
+  return false;
+}
+
+async function tryBackendRefreshToken() {
+  if (!SESSION_ID) return false;
 
   try {
-    // Use Google's token endpoint directly
-    const resp = await fetch('https://oauth2.googleapis.com/token', {
+    const resp = await fetch('/api/youtubeAccessToken', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: CLIENT_ID,
-        refresh_token: refreshToken,
-        grant_type: 'refresh_token'
-      })
+      headers: {
+        'Content-Type': 'application/json',
+        'X-FocusTube-Session': SESSION_ID
+      },
+      body: JSON.stringify({ sessionId: SESSION_ID })
     });
 
     if (!resp.ok) return false;
 
     const data = await resp.json();
-    if (!data.access_token) return false;
+    if (!data.accessToken) return false;
 
-    ACCESS_TOKEN = data.access_token;
-    TOKEN_EXPIRY = Date.now() + ((data.expires_in || 3600) * 1000) - 15000;
+    ACCESS_TOKEN = data.accessToken;
+    TOKEN_EXPIRY = Date.now() + ((data.expiresIn || 3600) * 1000) - 15000;
+    USER_NAME = data.userName || USER_NAME || 'YouTube User';
+    USER_CHANNEL_ID = data.userChannelId || USER_CHANNEL_ID || '';
     localStorage.setItem('ct_access_token', ACCESS_TOKEN);
     localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
-
-    await loadUserProfile();
+    localStorage.setItem('ct_user_name', USER_NAME);
+    if (USER_CHANNEL_ID) localStorage.setItem('ct_user_channel_id', USER_CHANNEL_ID);
     updateAuthStatus();
     return true;
   } catch {
-    // Clear invalid refresh token on failure
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
     return false;
   }
 }
@@ -904,6 +894,7 @@ function signOutYouTube() {
   localStorage.removeItem('ct_token_expiry');
   localStorage.removeItem('ct_user_name');
   localStorage.removeItem('ct_user_channel_id');
+  fetch('/api/revokeYouTubeSession', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FocusTube-Session': SESSION_ID }, body: JSON.stringify({ sessionId: SESSION_ID }) }).catch(() => {});
   refreshProfileChip();
   updateAuthStatus();
   document.getElementById('app').style.display = 'none';
@@ -1983,7 +1974,7 @@ async function apiFetch(url, opts = {}) {
   }
 
   if (wantsAuth && !hasValidToken()) {
-    const refreshed = await trySilentSignIn().catch(() => false);
+    const refreshed = await tryBackendRefreshToken().catch(() => false) || await trySilentSignIn().catch(() => false);
     if (!refreshed) throw new Error('Your sign-in expired. Please sign in again.');
   }
 
@@ -1991,7 +1982,7 @@ async function apiFetch(url, opts = {}) {
     return await runFetch();
   } catch (e) {
     if (wantsAuth && /expired|login required|invalid credentials|unauthorized|auth/i.test(String(e.message || ''))) {
-      const refreshed = await trySilentSignIn().catch(() => false);
+      const refreshed = await tryBackendRefreshToken().catch(() => false) || await trySilentSignIn().catch(() => false);
       if (refreshed) return runFetch();
     }
     throw e;
