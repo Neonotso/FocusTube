@@ -798,33 +798,59 @@ function signInYouTube() {
   try {
     ensureCodeClient();
     startBackendAuthFlow({ preferRedirect: isStandaloneIOS() }).then((ok) => {
-      if (!ok) showToast('Unable to start Google sign-in');
+      if (!ok) showToast('Unable to start Google sign-in (unknown launch failure)');
+    }).catch((e) => {
+      console.error('FocusTube sign-in launch failed', e);
+      showToast(`Sign-in launch failed: ${e?.message || 'unknown error'}`);
     });
   } catch (e) {
+    console.error('FocusTube sign-in preflight failed', e);
     showToast(e.message || 'Unable to start Google sign-in');
   }
 }
 
 async function startBackendAuthFlow(options = {}) {
-  if (!TOKEN_SERVICE_BASE || !SESSION_ID) return false;
+  if (!TOKEN_SERVICE_BASE) throw new Error('Missing token service URL');
+  if (!SESSION_ID) throw new Error('Missing session ID');
+
+  localStorage.setItem(TOKEN_SERVICE_BASE_KEY, TOKEN_SERVICE_BASE);
+  sessionStorage.setItem('ct_auth_in_progress', '1');
+
+  let res;
   try {
-    localStorage.setItem(TOKEN_SERVICE_BASE_KEY, TOKEN_SERVICE_BASE);
-    sessionStorage.setItem('ct_auth_in_progress', '1');
-    const res = await fetch(`${TOKEN_SERVICE_BASE}/auth/start?sessionId=${encodeURIComponent(SESSION_ID)}`);
-    const data = await res.json();
-    if (!data.authUrl) return false;
-    if (options.preferRedirect) {
-      showToast('Redirecting to Google sign-in…');
-      window.location.href = data.authUrl;
-      return true;
-    }
-    const popup = window.open(data.authUrl, '_blank', 'popup,width=520,height=700');
-    if (!popup) return false;
-    showToast('Complete sign-in in the popup, then return here');
-    return true;
-  } catch {
-    return false;
+    res = await fetch(`${TOKEN_SERVICE_BASE}/auth/start?sessionId=${encodeURIComponent(SESSION_ID)}`);
+  } catch (e) {
+    throw new Error(`Could not reach token service: ${e?.message || 'network error'}`);
   }
+
+  if (!res.ok) {
+    throw new Error(`Token service auth/start failed (${res.status})`);
+  }
+
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error('Token service returned invalid JSON');
+  }
+
+  if (!data.authUrl) {
+    throw new Error('Token service did not return authUrl');
+  }
+
+  if (options.preferRedirect) {
+    showToast('Redirecting to Google sign-in…');
+    window.location.href = data.authUrl;
+    return true;
+  }
+
+  const popup = window.open(data.authUrl, '_blank', 'popup,width=520,height=700');
+  if (!popup) {
+    throw new Error('Popup blocked or window.open returned null');
+  }
+
+  showToast('Complete sign-in in the popup, then return here');
+  return true;
 }
 
 async function trySilentSignIn() {
