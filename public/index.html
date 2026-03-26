@@ -603,7 +603,7 @@
     <h3>Token Service</h3>
     <p>For persistent login on your own devices, point FocusTube at your personal token service.</p>
     <div class="field-label">Token Service Base URL</div>
-    <input type="text" id="token-service-input" placeholder="http://100.x.y.z:8787 or https://your-tailnet-host" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+    <input type="text" id="token-service-input" placeholder="https://ryans-m1---fresh-start.tailed49b1.ts.net/focustube-token" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
     <button class="btn-secondary" onclick="saveTokenServiceBase()">Save Token Service URL</button>
   </div>
 
@@ -700,7 +700,7 @@ let nextPageTokens = {};
 let filteredShorts = 0;
 let tokenClient = null;
 let SESSION_ID = '';
-let TOKEN_SERVICE_BASE = '';
+let TOKEN_SERVICE_BASE = 'https://ryans-m1---fresh-start.tailed49b1.ts.net/focustube-token';
 let currentPlayingVideo = null;
 let playbackSaveTimer = null;
 let ytPlayer = null;
@@ -716,7 +716,7 @@ const likedVideoIds = new Set();
   USER_NAME = localStorage.getItem('ct_user_name') || '';
   SESSION_ID = localStorage.getItem(SESSION_ID_KEY) || crypto.randomUUID();
   localStorage.setItem(SESSION_ID_KEY, SESSION_ID);
-  TOKEN_SERVICE_BASE = localStorage.getItem(TOKEN_SERVICE_BASE_KEY) || '';
+  TOKEN_SERVICE_BASE = localStorage.getItem(TOKEN_SERVICE_BASE_KEY) || TOKEN_SERVICE_BASE;
   USER_CHANNEL_ID = localStorage.getItem('ct_user_channel_id') || '';
   LATER_PLAYLIST = {
     id: localStorage.getItem('ct_later_playlist_id') || '',
