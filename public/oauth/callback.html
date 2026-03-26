@@ -52,8 +52,8 @@
         const data = await refresh.json();
         localStorage.setItem('ct_access_token', data.accessToken || '');
         localStorage.setItem('ct_token_expiry', String(Date.now() + ((data.expiresIn || 3600) * 1000) - 15000));
-        status.textContent = 'Sign-in complete. Returning to FocusTube…';
-        setTimeout(() => { window.location.href = '/'; }, 600);
+        status.innerHTML = 'Sign-in complete. Returning to FocusTube in 2 seconds…<br><br><a href="/">If you are not redirected automatically, click here.</a>';
+        setTimeout(() => { window.location.href = '/'; }, 2000);
       } catch (err) {
         status.textContent = `Standalone sign-in failed: ${err.message}`;
       }

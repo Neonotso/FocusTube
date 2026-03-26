@@ -797,7 +797,7 @@ function isStandaloneIOS() {
 function signInYouTube() {
   try {
     ensureCodeClient();
-    startBackendAuthFlow({ preferRedirect: isStandaloneIOS() }).then((ok) => {
+    startBackendAuthFlow().then((ok) => {
       if (!ok) showToast('Unable to start Google sign-in');
     });
   } catch (e) {
@@ -805,7 +805,7 @@ function signInYouTube() {
   }
 }
 
-async function startBackendAuthFlow(options = {}) {
+async function startBackendAuthFlow() {
   if (!TOKEN_SERVICE_BASE || !SESSION_ID) return false;
   try {
     localStorage.setItem(TOKEN_SERVICE_BASE_KEY, TOKEN_SERVICE_BASE);
@@ -813,13 +813,11 @@ async function startBackendAuthFlow(options = {}) {
     const res = await fetch(`${TOKEN_SERVICE_BASE}/auth/start?sessionId=${encodeURIComponent(SESSION_ID)}`);
     const data = await res.json();
     if (!data.authUrl) return false;
-    if (options.preferRedirect) {
-      showToast('Redirecting to Google sign-in…');
+    const popup = window.open(data.authUrl, '_blank', 'popup,width=520,height=700');
+    if (!popup) {
       window.location.href = data.authUrl;
       return true;
     }
-    const popup = window.open(data.authUrl, '_blank', 'popup,width=520,height=700');
-    if (!popup) return false;
     showToast('Complete sign-in in the popup, then return here');
     return true;
   } catch {
