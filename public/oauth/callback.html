@@ -14,19 +14,48 @@
   <div id="status">Callback page loaded.</div>
   <code id="details"></code>
   <script>
-    (function () {
+    (async function () {
       const status = document.getElementById('status');
       const details = document.getElementById('details');
+      const query = window.location.search;
+      const tokenServiceBase = localStorage.getItem('ct_token_service_base') || '';
       try {
-        sessionStorage.setItem('ct_oauth_callback_query', window.location.search);
+        sessionStorage.setItem('ct_oauth_callback_query', query);
       } catch (e) {}
-      details.textContent = `href=${window.location.href}\nsearch=${window.location.search}\nhasOpener=${!!window.opener}`;
+      details.textContent = `href=${window.location.href}\nsearch=${query}\nhasOpener=${!!window.opener}\ntokenServiceBase=${tokenServiceBase}`;
       if (window.opener) {
         status.textContent = 'Posting OAuth callback to opener…';
-        window.opener.postMessage({ type: 'focustube-oauth-callback', query: window.location.search }, 'https://focustube.web.app');
+        window.opener.postMessage({ type: 'focustube-oauth-callback', query }, 'https://focustube.web.app');
         status.textContent = 'Posted callback to opener. If this window does not close automatically, return to the main app.';
-      } else {
-        status.textContent = 'No opener window found. Return to FocusTube to finish sign-in.';
+        return;
+      }
+      if (!tokenServiceBase) {
+        status.textContent = 'No opener window found, and no token service URL is saved.';
+        return;
+      }
+      try {
+        status.textContent = 'Finalizing sign-in with token service…';
+        const finalize = await fetch(`${tokenServiceBase}/oauth/finalize`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: query.replace(/^\?/, '')
+        });
+        if (!finalize.ok) throw new Error('Finalize failed');
+        status.textContent = 'Refreshing access token…';
+        const sessionId = localStorage.getItem('ct_session_id_v1') || '';
+        const refresh = await fetch(`${tokenServiceBase}/token/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId })
+        });
+        if (!refresh.ok) throw new Error('Token refresh failed');
+        const data = await refresh.json();
+        localStorage.setItem('ct_access_token', data.accessToken || '');
+        localStorage.setItem('ct_token_expiry', String(Date.now() + ((data.expiresIn || 3600) * 1000) - 15000));
+        status.textContent = 'Sign-in complete. Returning to FocusTube…';
+        setTimeout(() => { window.location.href = '/'; }, 600);
+      } catch (err) {
+        status.textContent = `Standalone sign-in failed: ${err.message}`;
       }
     })();
   </script>
