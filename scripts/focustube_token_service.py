@@ -16,7 +16,7 @@ CLIENT_SECRET_PATH = SECRETS_DIR / 'google_oauth_client.json'
 STATE_PATH = SECRETS_DIR / 'oauth_state.json'
 HOST = os.getenv('FOCUSTUBE_TOKEN_HOST', '127.0.0.1')
 PORT = int(os.getenv('FOCUSTUBE_TOKEN_PORT', '8787'))
-REDIRECT_URI = os.getenv('FOCUSTUBE_REDIRECT_URI', f'http://100.105.118.34:{PORT}/oauth/callback')
+REDIRECT_URI = os.getenv('FOCUSTUBE_REDIRECT_URI', 'https://focustube.web.app/oauth/callback')
 ALLOWED_ORIGIN = os.getenv('FOCUSTUBE_ALLOWED_ORIGIN', 'https://focustube.web.app')
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 
@@ -99,17 +99,44 @@ class Handler(BaseHTTPRequestHandler):
             return json_response(self, 200, {'authUrl': auth_url})
 
         if self.path.startswith('/oauth/callback'):
-            qs = parse_qs(self.path.split('?', 1)[1] if '?' in self.path else '')
+            qs = self.path.split('?', 1)[1] if '?' in self.path else ''
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            html = f"""<html><body><h2>Finishing FocusTube sign-in…</h2><script>
+(async function() {{
+  try {{
+    const resp = await fetch('http://100.105.118.34:{PORT}/oauth/finalize', {{
+      method: 'POST',
+      headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
+      body: {json.dumps(qs)}
+    }});
+    if (!resp.ok) throw new Error('Finalize failed');
+    if (window.opener) window.opener.postMessage({{ type: 'focustube-auth-complete' }}, 'https://focustube.web.app');
+    window.close();
+    document.body.innerHTML = '<h2>FocusTube authorization complete.</h2><p>You can return to the app now.</p>';
+  }} catch (e) {{
+    document.body.innerHTML = '<h2>FocusTube sign-in failed.</h2><p>' + e.message + '</p>';
+  }}
+}})();
+</script></body></html>"""
+            self.wfile.write(html.encode('utf-8'))
+            return
+
+        return json_response(self, 404, {'error': 'Not found'})
+
+    def do_POST(self):
+        if self.path == '/oauth/finalize':
+            length = int(self.headers.get('Content-Length', '0') or '0')
+            raw = self.rfile.read(length).decode('utf-8') if length else ''
+            qs = parse_qs(raw)
             code = qs.get('code', [None])[0]
             state = qs.get('state', [None])[0]
             saved = json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {}
             saved_state = saved.get('state')
             session_id = saved.get('sessionId')
             if not code or not state or state != saved_state:
-                self.send_response(400)
-                self.end_headers()
-                self.wfile.write(b'Invalid OAuth callback')
-                return
+                return json_response(self, 400, {'error': 'Invalid OAuth finalize request'})
             flow = build_flow(state=state)
             flow.fetch_token(code=code)
             creds = flow.credentials
@@ -122,15 +149,8 @@ class Handler(BaseHTTPRequestHandler):
                 'expiry': creds.expiry.isoformat() if creds.expiry else None,
                 'session_id': session_id,
             })
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(b'<html><body><h2>FocusTube authorization complete.</h2><script>window.close && window.close();</script><p>You can return to the app now.</p></body></html>')
-            return
+            return json_response(self, 200, {'ok': True})
 
-        return json_response(self, 404, {'error': 'Not found'})
-
-    def do_POST(self):
         if self.path == '/token/refresh':
             length = int(self.headers.get('Content-Length', '0') or '0')
             body = json.loads(self.rfile.read(length) or b'{}') if length else {}
@@ -146,7 +166,8 @@ class Handler(BaseHTTPRequestHandler):
                     'client_id': creds.client_id,
                     'client_secret': creds.client_secret,
                     'scopes': creds.scopes,
-                    'expiry': creds.expiry.strftime('%Y-%m-%dT%H:%M:%S') if creds.expiry else None,
+                    'expiry': creds.expiry.isoformat() if creds.expiry else None,
+                    'session_id': session_id,
                 })
             expires_in = 3600
             if creds.expiry:

@@ -1981,6 +1981,29 @@ function showSigninRequired(message) {
   document.getElementById('main-content').innerHTML = `<div class="empty"><div class="icon">🔐</div><p>${escHtml(message)}</p><br><button class="btn-primary" onclick="signInYouTube()" style="max-width:240px">Sign in with Google</button></div>`;
 }
 
+window.addEventListener('message', async (event) => {
+  if (event.origin !== 'https://focustube.web.app') return;
+  if (event.data?.type !== 'focustube-oauth-callback') return;
+  try {
+    const res = await fetch(`${TOKEN_SERVICE_BASE}/oauth/finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: event.data.query.replace(/^\?/, '')
+    });
+    if (!res.ok) throw new Error('Could not finalize sign-in');
+    const refreshed = await tryBackendRefreshToken().catch(() => false);
+    if (refreshed) {
+      showApp();
+      switchTab(currentTab || 'search');
+      showToast('Signed in successfully');
+    } else {
+      showToast('Sign-in completed but token refresh failed');
+    }
+  } catch (e) {
+    showToast(e.message || 'FocusTube sign-in failed');
+  }
+});
+
 window.addEventListener('focus', async () => {
   if (!hasValidToken() && TOKEN_SERVICE_BASE) {
     const refreshed = await tryBackendRefreshToken().catch(() => false);

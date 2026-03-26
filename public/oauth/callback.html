@@ -8,20 +8,11 @@
 <body>
   <p>Finishing FocusTube sign-in…</p>
   <script>
-    (async function () {
-      try {
-        const serviceBase = localStorage.getItem('ct_token_service_base') || '';
-        if (!serviceBase) {
-          document.body.textContent = 'Missing token service base URL.';
-          return;
-        }
-        const callbackUrl = serviceBase.replace(/\/$/, '') + '/oauth/callback' + window.location.search;
-        const res = await fetch(callbackUrl, { method: 'GET' });
-        const text = await res.text();
-        document.body.innerHTML = text;
-      } catch (e) {
-        document.body.textContent = 'FocusTube sign-in callback failed.';
+    (function () {
+      if (window.opener) {
+        window.opener.postMessage({ type: 'focustube-oauth-callback', query: window.location.search }, 'https://focustube.web.app');
       }
+      document.body.innerHTML = '<p>Finishing FocusTube sign-in… You can return to the app.</p>';
     })();
   </script>
 </body>
