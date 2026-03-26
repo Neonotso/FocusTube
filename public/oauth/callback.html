@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FocusTube OAuth Callback</title>
+</head>
+<body>
+  <p>Finishing FocusTube sign-in…</p>
+  <script>
+    (async function () {
+      try {
+        const serviceBase = localStorage.getItem('ct_token_service_base') || '';
+        if (!serviceBase) {
+          document.body.textContent = 'Missing token service base URL.';
+          return;
+        }
+        const callbackUrl = serviceBase.replace(/\/$/, '') + '/oauth/callback' + window.location.search;
+        const res = await fetch(callbackUrl, { method: 'GET' });
+        const text = await res.text();
+        document.body.innerHTML = text;
+      } catch (e) {
+        document.body.textContent = 'FocusTube sign-in callback failed.';
+      }
+    })();
+  </script>
+</body>
+</html>

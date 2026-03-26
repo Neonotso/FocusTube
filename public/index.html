@@ -600,6 +600,14 @@
   
   
   <div class="info-card">
+    <h3>Token Service</h3>
+    <p>For persistent login on your own devices, point FocusTube at your personal token service.</p>
+    <div class="field-label">Token Service Base URL</div>
+    <input type="text" id="token-service-input" placeholder="http://100.x.y.z:8787 or https://your-tailnet-host" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false">
+    <button class="btn-secondary" onclick="saveTokenServiceBase()">Save Token Service URL</button>
+  </div>
+
+  <div class="info-card">
     <h3>Optional: API Key</h3>
     <p>For advanced users, you can add a YouTube Data API key for extra flexibility on public requests.</p>
     <div class="field-label">YouTube Data API v3 Key</div>
@@ -679,6 +687,7 @@ const LIKED_VIDEOS_KEY = 'ct_liked_videos_v1';
 const WATCH_PROGRESS_KEY = 'ct_watch_progress_v1';
 const LAST_WATCHED_VIDEO_KEY = 'ct_last_watched_video_v1';
 const SESSION_ID_KEY = 'ct_session_id_v1';
+const TOKEN_SERVICE_BASE_KEY = 'ct_token_service_base';
 let API_KEY = '';
 let CLIENT_ID = '';
 let ACCESS_TOKEN = '';
@@ -691,6 +700,7 @@ let nextPageTokens = {};
 let filteredShorts = 0;
 let tokenClient = null;
 let SESSION_ID = '';
+let TOKEN_SERVICE_BASE = '';
 let currentPlayingVideo = null;
 let playbackSaveTimer = null;
 let ytPlayer = null;
@@ -706,6 +716,7 @@ const likedVideoIds = new Set();
   USER_NAME = localStorage.getItem('ct_user_name') || '';
   SESSION_ID = localStorage.getItem(SESSION_ID_KEY) || crypto.randomUUID();
   localStorage.setItem(SESSION_ID_KEY, SESSION_ID);
+  TOKEN_SERVICE_BASE = localStorage.getItem(TOKEN_SERVICE_BASE_KEY) || '';
   USER_CHANNEL_ID = localStorage.getItem('ct_user_channel_id') || '';
   LATER_PLAYLIST = {
     id: localStorage.getItem('ct_later_playlist_id') || '',
@@ -714,6 +725,8 @@ const likedVideoIds = new Set();
   loadPersistedLikedVideos();
 
   document.getElementById('api-key-input').value = API_KEY;
+  const tsInput = document.getElementById('token-service-input');
+  if (tsInput) tsInput.value = TOKEN_SERVICE_BASE;
 
   updateAuthStatus();
   if (hasValidToken()) {
@@ -756,6 +769,12 @@ function updateAuthStatus() {
   }
 }
 
+function saveTokenServiceBase() {
+  TOKEN_SERVICE_BASE = document.getElementById('token-service-input').value.trim().replace(/\/$/, '');
+  localStorage.setItem(TOKEN_SERVICE_BASE_KEY, TOKEN_SERVICE_BASE);
+  showToast(TOKEN_SERVICE_BASE ? 'Token service URL saved' : 'Token service URL cleared');
+}
+
 function saveOptionalApiKey() {
   API_KEY = document.getElementById('api-key-input').value.trim();
   localStorage.setItem('ct_api_key', API_KEY);
@@ -766,65 +785,31 @@ function ensureCodeClient() {
   if (!CLIENT_ID) {
     throw new Error('Save your Google OAuth Client ID first');
   }
-  if (!window.google || !google.accounts || !google.accounts.oauth2) {
-    throw new Error('Google sign-in library not loaded yet');
-  }
-  if (!tokenClient) {
-    tokenClient = google.accounts.oauth2.initCodeClient({
-      client_id: CLIENT_ID,
-      scope: YT_SCOPE,
-      ux_mode: 'popup',
-      callback: async (resp) => {
-        if (resp.error || !resp.code) {
-          showToast(resp.error || 'Google sign-in failed');
-          return;
-        }
-        const ok = await exchangeCodeForSession(resp.code);
-        if (!ok) {
-          showToast('Could not complete server sign-in');
-          return;
-        }
-        await loadUserProfile();
-        updateAuthStatus();
-        showApp();
-        switchTab('search');
-        showToast('Signed in successfully');
-      }
-    });
+  if (!TOKEN_SERVICE_BASE) {
+    throw new Error('Save your token service base URL first');
   }
 }
 
 function signInYouTube() {
   try {
     ensureCodeClient();
-    tokenClient.requestCode();
+    startBackendAuthFlow().then((ok) => {
+      if (!ok) showToast('Unable to start Google sign-in');
+    });
   } catch (e) {
     showToast(e.message || 'Unable to start Google sign-in');
   }
 }
 
-async function exchangeCodeForSession(code) {
-  if (!code || !SESSION_ID) return false;
+async function startBackendAuthFlow() {
+  if (!TOKEN_SERVICE_BASE || !SESSION_ID) return false;
   try {
-    const resp = await fetch('/api/exchangeYouTubeCode', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-FocusTube-Session': SESSION_ID
-      },
-      body: JSON.stringify({ sessionId: SESSION_ID, code })
-    });
-    if (!resp.ok) return false;
-    const data = await resp.json();
-    if (!data.accessToken) return false;
-    ACCESS_TOKEN = data.accessToken;
-    TOKEN_EXPIRY = Date.now() + ((data.expiresIn || 3600) * 1000) - 15000;
-    USER_NAME = data.userName || USER_NAME || 'YouTube User';
-    USER_CHANNEL_ID = data.userChannelId || USER_CHANNEL_ID || '';
-    localStorage.setItem('ct_access_token', ACCESS_TOKEN);
-    localStorage.setItem('ct_token_expiry', String(TOKEN_EXPIRY));
-    localStorage.setItem('ct_user_name', USER_NAME);
-    if (USER_CHANNEL_ID) localStorage.setItem('ct_user_channel_id', USER_CHANNEL_ID);
+    localStorage.setItem(TOKEN_SERVICE_BASE_KEY, TOKEN_SERVICE_BASE);
+    const res = await fetch(`${TOKEN_SERVICE_BASE}/auth/start?sessionId=${encodeURIComponent(SESSION_ID)}`);
+    const data = await res.json();
+    if (!data.authUrl) return false;
+    window.open(data.authUrl, '_blank', 'popup,width=520,height=700');
+    showToast('Complete sign-in in the popup, then return here');
     return true;
   } catch {
     return false;
@@ -839,11 +824,11 @@ async function tryBackendRefreshToken() {
   if (!SESSION_ID) return false;
 
   try {
-    const resp = await fetch('/api/youtubeAccessToken', {
+    if (!TOKEN_SERVICE_BASE) return false;
+    const resp = await fetch(`${TOKEN_SERVICE_BASE}/token/refresh`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'X-FocusTube-Session': SESSION_ID
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ sessionId: SESSION_ID })
     });
@@ -894,7 +879,9 @@ function signOutYouTube() {
   localStorage.removeItem('ct_token_expiry');
   localStorage.removeItem('ct_user_name');
   localStorage.removeItem('ct_user_channel_id');
-  fetch('/api/revokeYouTubeSession', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-FocusTube-Session': SESSION_ID }, body: JSON.stringify({ sessionId: SESSION_ID }) }).catch(() => {});
+  if (TOKEN_SERVICE_BASE) {
+    fetch(`${TOKEN_SERVICE_BASE}/token/revoke`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: SESSION_ID }) }).catch(() => {});
+  }
   refreshProfileChip();
   updateAuthStatus();
   document.getElementById('app').style.display = 'none';
@@ -1992,6 +1979,17 @@ async function apiFetch(url, opts = {}) {
 function showSigninRequired(message) {
   document.getElementById('main-content').innerHTML = `<div class="empty"><div class="icon">🔐</div><p>${escHtml(message)}</p><br><button class="btn-primary" onclick="signInYouTube()" style="max-width:240px">Sign in with Google</button></div>`;
 }
+
+window.addEventListener('focus', async () => {
+  if (!hasValidToken() && TOKEN_SERVICE_BASE) {
+    const refreshed = await tryBackendRefreshToken().catch(() => false);
+    if (refreshed) {
+      showApp();
+      switchTab(currentTab || 'search');
+      showToast('Signed in successfully');
+    }
+  }
+});
 function updateFilteredCount() {
   document.getElementById('filtered-count').textContent = filteredShorts > 0 ? `${filteredShorts} Shorts blocked` : '';
 }
