@@ -13,7 +13,7 @@ firebase deploy
 FocusTube uses a small local token backend on Ryan's Mac for YouTube OAuth refreshes.
 
 - local service: `http://127.0.0.1:8787`
-- Tailscale path: `https://ryans-m1---fresh-start.tailed49b1.ts.net/focustube-token`
+- Tailscale path: `https://ryans-mac-studio.tailed49b1.ts.net/focustube-token`
 - launch agent label: `com.ryan.focustube-token-service`
 
 ### Automatic behavior
@@ -58,7 +58,7 @@ curl http://127.0.0.1:8787/health
 Check Tailscale-routed health:
 
 ```bash
-curl https://ryans-m1---fresh-start.tailed49b1.ts.net/focustube-token/health
+curl https://ryans-mac-studio.tailed49b1.ts.net/focustube-token/health
 ```
 
 View logs:
@@ -77,7 +77,7 @@ Healthy expected responses:
 
 ```bash
 curl http://127.0.0.1:8787/health
-curl https://ryans-m1---fresh-start.tailed49b1.ts.net/focustube-token/health
+curl https://ryans-mac-studio.tailed49b1.ts.net/focustube-token/health
 ```
 
 Both should return:
