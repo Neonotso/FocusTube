@@ -16,7 +16,7 @@ CLIENT_SECRET_PATH = SECRETS_DIR / 'google_oauth_client.json'
 STATE_PATH = SECRETS_DIR / 'oauth_state.json'
 HOST = os.getenv('FOCUSTUBE_TOKEN_HOST', '127.0.0.1')
 PORT = int(os.getenv('FOCUSTUBE_TOKEN_PORT', '8787'))
-REDIRECT_URI = os.getenv('FOCUSTUBE_REDIRECT_URI', 'https://focustube.web.app/oauth/callback.html')
+REDIRECT_URI = os.getenv('FOCUSTUBE_REDIRECT_URI', 'https://ryans-mac-studio.tailed49b1.ts.net/focustube-token/oauth/callback')
 ALLOWED_ORIGIN = os.getenv('FOCUSTUBE_ALLOWED_ORIGIN', 'https://focustube.web.app')
 SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl']
 
@@ -56,13 +56,16 @@ def save_tokens(data):
     os.chmod(TOKENS_PATH, 0o600)
 
 
-def build_flow(state=None):
-    return Flow.from_client_secrets_file(
+def build_flow(state=None, code_verifier=None):
+    flow = Flow.from_client_secrets_file(
         str(CLIENT_SECRET_PATH),
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI,
         state=state,
     )
+    if code_verifier:
+        flow.code_verifier = code_verifier
+    return flow
 
 
 def creds_from_saved(session_id=None):
@@ -97,7 +100,12 @@ class Handler(BaseHTTPRequestHandler):
                 return json_response(self, 500, {'error': f'Missing client secret file at {CLIENT_SECRET_PATH}'})
             qs = parse_qs(self.path.split('?', 1)[1] if '?' in self.path else '')
             session_id = qs.get('sessionId', [None])[0]
-            flow = build_flow()
+
+            # Generate PKCE code verifier for this flow
+            import secrets
+            code_verifier = secrets.token_urlsafe(64)
+
+            flow = build_flow(code_verifier=code_verifier)
             auth_url, state = flow.authorization_url(
                 access_type='offline',
                 include_granted_scopes='true',
@@ -107,7 +115,7 @@ class Handler(BaseHTTPRequestHandler):
             STATE_PATH.write_text(json.dumps({
                 'state': state,
                 'sessionId': session_id,
-                'codeVerifier': getattr(flow, 'code_verifier', None)
+                'codeVerifier': code_verifier
             }))
             if self.headers.get('Accept', '').find('application/json') >= 0 or self.path.find('format=json') >= 0:
                 return json_response(self, 200, {'authUrl': auth_url})
@@ -119,19 +127,55 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path.startswith('/oauth/callback'):
             qs = self.path.split('?', 1)[1] if '?' in self.path else ''
+            # For code exchange, we need to parse the query string and exchange directly
+            if qs:
+                parsed = parse_qs(qs)
+                code = parsed.get('code', [None])[0]
+                state = parsed.get('state', [None])[0]
+                
+                if code and state:
+                    saved = json.loads(STATE_PATH.read_text()) if STATE_PATH.exists() else {}
+                    saved_state = saved.get('state')
+                    code_verifier = saved.get('codeVerifier')
+                    
+                    if state == saved_state:
+                        try:
+                            flow = build_flow(state=state, code_verifier=code_verifier)
+                            flow.fetch_token(code=code, code_verifier=code_verifier)
+                            creds = flow.credentials
+                            save_tokens({
+                                'token': creds.token,
+                                'refresh_token': creds.refresh_token,
+                                'client_id': creds.client_id,
+                                'client_secret': creds.client_secret,
+                                'scopes': creds.scopes,
+                                'expiry': creds.expiry.isoformat() if creds.expiry else None,
+                                'session_id': saved.get('sessionId'),
+                            })
+                            
+                            self.send_response(200)
+                            self.send_header('Content-Type', 'text/html; charset=utf-8')
+                            self.end_headers()
+                            self.wfile.write(b'<!DOCTYPE html><html><body><h2>Sign-in complete!</h2><p>You may close this window and return to FocusTube.</p><script>if(window.opener)window.opener.postMessage({type:"focustube-auth-complete"},"*");setTimeout(() => window.close(), 1500);</script></body></html>')
+                            return
+                        except Exception as e:
+                            print('OAuth callback error:', e)
+            
+            # Fallback: serve callback HTML that can handle the query string via JS
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
             self.end_headers()
-            html = f"""<html><body><h2>Finishing FocusTube sign-in…</h2><script>
+            html = f"""<html><body><h2>Finishing FocusTube sign-in...</h2><script>
 (async function() {{
   try {{
-    const resp = await fetch('http://100.105.118.34:{PORT}/oauth/finalize', {{
+    const qs = window.location.search.substring(1);
+    const resp = await fetch('https://ryans-mac-studio.tailed49b1.ts.net/focustube-token/oauth/finalize', {{
       method: 'POST',
       headers: {{ 'Content-Type': 'application/x-www-form-urlencoded' }},
-      body: {json.dumps(qs)}
+      body: qs
     }});
-    if (!resp.ok) throw new Error('Finalize failed');
-    if (window.opener) window.opener.postMessage({{ type: 'focustube-auth-complete' }}, 'https://focustube.web.app');
+    if (!resp.ok) throw new Error('Finalize failed: ' + resp.status);
+    if (window.opener) window.opener.postMessage({{ type: 'focustube-auth-complete' }}, '*');
     window.close();
     document.body.innerHTML = '<h2>FocusTube authorization complete.</h2><p>You can return to the app now.</p>';
   }} catch (e) {{
@@ -159,9 +203,7 @@ class Handler(BaseHTTPRequestHandler):
             print('OAUTH FINALIZE PARSED', {'code_present': bool(code), 'state': state, 'saved_state': saved_state, 'sessionId': session_id, 'has_code_verifier': bool(code_verifier)})
             if not code or not state or state != saved_state:
                 return json_response(self, 400, {'error': 'Invalid OAuth finalize request'})
-            flow = build_flow(state=state)
-            if code_verifier:
-                flow.code_verifier = code_verifier
+            flow = build_flow(state=state, code_verifier=code_verifier)
             flow.fetch_token(code=code, code_verifier=code_verifier)
             creds = flow.credentials
             save_tokens({
