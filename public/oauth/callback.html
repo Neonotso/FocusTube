@@ -5,35 +5,26 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FocusTube OAuth Callback</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; line-height: 1.5; }
-    code { white-space: pre-wrap; word-break: break-word; display: block; margin-top: 12px; }
+    body { font-family: sans-serif; padding: 20px; line-height: 1.5; text-align: center; }
+    .btn { display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 15px; cursor: pointer; }
+    .btn:hover { background-color: #0056b3; }
+    #fallback-link { display: none; margin-top: 10px; }
   </style>
 </head>
 <body>
   <h2>Finishing FocusTube sign-in…</h2>
-  <div id="status">Callback page loaded.</div>
-  <code id="details"></code>
+  <div id="status">Connecting to token service…</div>
   <script>
     (async function () {
       const status = document.getElementById('status');
-      const details = document.getElementById('details');
       const query = window.location.search;
-      const tokenServiceBase = localStorage.getItem('ct_token_service_base') || 'https://ryans-mac-studio.tailed49b1.ts.net/focustube-token';
+      
+      // Dynamically determine the base URL (works for both NGROK and Tailscale)
+      const baseUrl = window.location.origin;
+      const tokenServiceBase = localStorage.getItem('ct_token_service_base') || `${baseUrl}/focustube-token`;
+      
       try {
-        sessionStorage.setItem('ct_oauth_callback_query', query);
-      } catch (e) {}
-      details.textContent = `href=${window.location.href}\nsearch=${query}\nhasOpener=${!!window.opener}\ntokenServiceBase=${tokenServiceBase}`;
-      if (window.opener) {
-        status.textContent = 'Posting OAuth callback to opener…';
-        window.opener.postMessage({ type: 'focustube-oauth-callback', query }, 'https://focustube.web.app');
-        status.textContent = 'Posted callback to opener. If this window does not close automatically, return to the main app.';
-        return;
-      }
-      if (!tokenServiceBase) {
-        status.textContent = 'No opener window found, and no token service URL is saved.';
-        return;
-      }
-      try {
+        // 1. Finalize the OAuth exchange locally
         status.textContent = 'Finalizing sign-in with token service…';
         const finalize = await fetch(`${tokenServiceBase}/oauth/finalize`, {
           method: 'POST',
@@ -41,6 +32,8 @@
           body: query.replace(/^\?/, '')
         });
         if (!finalize.ok) throw new Error('Finalize failed');
+        
+        // 2. Refresh access token for the app
         status.textContent = 'Refreshing access token…';
         const sessionId = localStorage.getItem('ct_session_id_v1') || '';
         const refresh = await fetch(`${tokenServiceBase}/token/refresh`, {
@@ -50,13 +43,32 @@
         });
         if (!refresh.ok) throw new Error('Token refresh failed');
         const data = await refresh.json();
+        
+        // 3. Save session data
         localStorage.setItem('ct_access_token', data.accessToken || '');
         localStorage.setItem('ct_token_expiry', String(Date.now() + ((data.expiresIn || 3600) * 1000) - 15000));
-        status.innerHTML = 'Sign-in complete. Returning to FocusTube in 2 seconds…<br><br><a href="/">If you are not redirected automatically, click here.</a>';
-        setTimeout(() => { window.location.href = '/'; }, 2000);
+        
+        // 4. Success state
+        status.textContent = 'Sign-in complete!';
       } catch (err) {
-        status.textContent = `Standalone sign-in failed: ${err.message}`;
+        status.textContent = `Sign-in failed: ${err.message}`;
       }
+
+      // 5. Auto-redirect and fallback (works on iPhone and Desktop)
+      status.innerHTML = 'Authorization complete. Redirecting to FocusTube in 2 seconds…';
+      
+      // Add the manual button fallback
+      const manualBtn = document.createElement('a');
+      manualBtn.href = baseUrl + '/';
+      manualBtn.className = 'btn';
+      manualBtn.innerText = 'Return to FocusTube';
+      manualBtn.id = 'fallback-link';
+      document.body.appendChild(manualBtn);
+
+      // Attempt auto-redirect
+      setTimeout(() => { 
+        window.location.replace(baseUrl + '/'); // replace() prevents getting stuck in a back-history loop
+      }, 2000);
     })();
   </script>
 </body>
